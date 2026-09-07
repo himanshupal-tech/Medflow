@@ -56,10 +56,16 @@ import {
   CheckCircle2,
   PhoneCall,
   BarChart3,
+  CircleHelp,
+  LifeBuoy,
+  ChevronDown,
 } from "lucide-react";
 import { getRedFlags } from "./data/redFlagRules";
 
 import "./App.css";
+
+const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
+const DOCUMENT_SIZE_ERROR = "File is too large. Please upload a document smaller than 10 MB.";
 
 // Body system accent color palette
 const SYSTEM_COLORS = {
@@ -77,7 +83,7 @@ function App() {
   const { t } = useTranslation();
 
   const [page, setPage] = useState(() => {
-    const byPath = { "/dashboard": "dashboard", "/documents": "documents", "/medical-records": "records", "/profile": "profile", "/hospital-token": "hospital-token", "/live-queue": "live-queue", "/doctor-dashboard": "doctor-dashboard", "/doctor-queue": "doctor-queue", "/doctor-patients": "doctor-patients", "/doctor-assessments": "doctor-assessments", "/doctor-profile": "doctor-profile", "/admin-dashboard": "admin-dashboard", "/admin-hospitals": "admin-hospitals", "/admin-doctors": "admin-doctors", "/admin-queues": "admin-queues", "/admin-patients": "admin-patients", "/admin-reports": "admin-reports" };
+    const byPath = { "/dashboard": "dashboard", "/documents": "documents", "/medical-records": "records", "/find-doctor": "find-doctor", "/faq": "faq", "/help": "help", "/profile": "profile", "/hospital-token": "hospital-token", "/live-queue": "live-queue", "/doctor-dashboard": "doctor-dashboard", "/doctor-queue": "doctor-queue", "/doctor-patients": "doctor-patients", "/doctor-assessments": "doctor-assessments", "/doctor-documents": "doctor-documents", "/doctor-review": "doctor-review", "/doctor-profile": "doctor-profile", "/admin-dashboard": "admin-dashboard", "/admin-hospitals": "admin-hospitals", "/admin-doctors": "admin-doctors", "/admin-queues": "admin-queues", "/admin-patients": "admin-patients", "/admin-reports": "admin-reports" };
     Object.assign(byPath, { "/admin-assessments": "admin-assessments", "/admin-profile": "admin-profile" });
     return window.location.pathname.startsWith("/queue-status/") ? "queue-status" : (byPath[window.location.pathname] || "login");
   });
@@ -98,6 +104,12 @@ function App() {
   const [platformError, setPlatformError] = useState("");
   const [platformNotice, setPlatformNotice] = useState("");
   const [selectedStaffToken, setSelectedStaffToken] = useState(null);
+  const [selectedStaffTokenId, setSelectedStaffTokenId] = useState(null);
+  const [physicianReview, setPhysicianReview] = useState(null);
+  const [reviewDraft, setReviewDraft] = useState("");
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [patientClinicalReview, setPatientClinicalReview] = useState(null);
+  const [patientClinicalReviewState, setPatientClinicalReviewState] = useState("idle");
   const [publicQueueStatus, setPublicQueueStatus] = useState(null);
   const [authForm, setAuthForm] = useState({ identityType: "abha", identity: "", password: "", mobile: "", otp: "", profileName: "", abhaId: "", dateOfBirth: "", gender: "" });
   const [authError, setAuthError] = useState("");
@@ -151,17 +163,28 @@ function App() {
   const [summaryLanguage, setSummaryLanguage] = useState("english");
   const [hospitals, setHospitals] = useState([]);
   const [selectedHospitalId, setSelectedHospitalId] = useState("");
+  const [selectedDepartment, setSelectedDepartment] = useState("");
   const [queueDoctors, setQueueDoctors] = useState([]);
   const [loadingQueueDoctors, setLoadingQueueDoctors] = useState(false);
   const [activeToken, setActiveToken] = useState(null);
   const [queueError, setQueueError] = useState("");
+  const [lastQueueUpdated, setLastQueueUpdated] = useState(null);
+  const [expandedFaq, setExpandedFaq] = useState(null);
+  const [faqCategory, setFaqCategory] = useState("General");
+  const [faqSearch, setFaqSearch] = useState("");
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [documentPreview, setDocumentPreview] = useState(null);
   const [analyzingIntake, setAnalyzingIntake] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [savingClinicalSummary, setSavingClinicalSummary] = useState(false);
   const [clinicalSummarySaveError, setClinicalSummarySaveError] = useState("");
+  const [showDemoResetConfirm, setShowDemoResetConfirm] = useState(false);
+  const [resettingDemo, setResettingDemo] = useState(false);
+  const [demoResetNotice, setDemoResetNotice] = useState("");
   // These documents are scoped to the current intake. Their extracted content,
   // not the raw files, is sent to the server-side clinical-summary endpoint.
   const [intakeDocuments, setIntakeDocuments] = useState([]);
+  const lastAnnouncedQueueTokenRef = useRef(null);
 
   const API_URL = "http://localhost:5000";
 
@@ -187,6 +210,7 @@ function App() {
     }
     setLoadingQueueDoctors(true);
     setQueueDoctors([]);
+    setSelectedDepartment("");
     setQueueError("");
     try {
       const data = await queueRequest(`/api/hospitals/${hospitalId}/doctors`);
@@ -204,6 +228,7 @@ function App() {
       setQueueError("");
       const data = await queueRequest("/api/tokens", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: authenticatedUser?.patientId, assessmentId, hospitalId: selectedHospitalId, doctorId }) });
       setActiveToken(data.token);
+      setLastQueueUpdated(new Date());
     } catch (error) { setQueueError(error.message); }
   }
 
@@ -327,22 +352,27 @@ function App() {
     setSavingAssessment(true);
     setAssessmentSaveError("");
 
+    // These fields map to text columns in clinical_history. Keep the yes/no
+    // answers separate and always send plain strings, even after a voice input
+    // or an interrupted/legacy state update.
+    const clinicalHistoryPayload = {
+      medicalConditionsHas: intakeData.medicalConditionsHas,
+      medicalConditionsText: String(intakeData.medicalConditionsText ?? "").trim(),
+      medicationsHas: intakeData.medicationsHas,
+      medicationsText: String(intakeData.medicationsText ?? "").trim(),
+      allergiesHas: intakeData.allergiesHas,
+      allergiesText: String(intakeData.allergiesText ?? "").trim(),
+      previousSimilar: intakeData.previousSimilar,
+      recentInjuryHas: intakeData.recentInjuryHas,
+      recentInjuryText: String(intakeData.recentInjuryText ?? "").trim(),
+      additionalInformation: String(intakeData.additionalInformation ?? "").trim(),
+    };
+
     try {
       await assessmentRequest(`/api/assessments/${assessmentId}/clinical-history`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          medicalConditionsHas: intakeData.medicalConditionsHas,
-          medicalConditionsText: intakeData.medicalConditionsText,
-          medicationsHas: intakeData.medicationsHas,
-          medicationsText: intakeData.medicationsText,
-          allergiesHas: intakeData.allergiesHas,
-          allergiesText: intakeData.allergiesText,
-          previousSimilar: intakeData.previousSimilar,
-          recentInjuryHas: intakeData.recentInjuryHas,
-          recentInjuryText: intakeData.recentInjuryText,
-          additionalInformation: intakeData.additionalInformation,
-        }),
+        body: JSON.stringify(clinicalHistoryPayload),
       });
       setIntakeStep(5);
     } catch (error) {
@@ -352,15 +382,24 @@ function App() {
     }
   }
 
-  useEffect(() => { if (page === "hospital-token") loadHospitals(); }, [page]);
-  useEffect(() => { if (selectedHospitalId && page === "hospital-token") loadDoctors(selectedHospitalId); }, [selectedHospitalId, page]);
+  useEffect(() => { if (["find-doctor", "hospital-token"].includes(page)) loadHospitals(); }, [page]);
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      if (documentPreview) closeDocumentPreview();
+      if (profileMenuOpen) setProfileMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [documentPreview, profileMenuOpen]);
+  useEffect(() => { if (selectedHospitalId && ["find-doctor", "hospital-token"].includes(page)) loadDoctors(selectedHospitalId); }, [selectedHospitalId, page]);
   useEffect(() => {
     if (authenticatedUser?.role === "staff" && ["doctor-dashboard", "doctor-queue", "doctor-patients"].includes(page)) loadStaffDashboard();
     if (authenticatedUser?.role === "admin" && page.startsWith("admin-")) loadAdminData();
   }, [page, authenticatedUser?.role]);
   useEffect(() => {
     if (authenticatedUser?.role !== "patient" || !authenticatedUser.patientId) return;
-    queueRequest(`/api/patients/${authenticatedUser.patientId}/active-token`).then((data) => setActiveToken(data.token)).catch(() => setActiveToken(null));
+    queueRequest(`/api/patients/${authenticatedUser.patientId}/active-token`).then((data) => { setActiveToken(data.token); setLastQueueUpdated(new Date()); }).catch(() => setActiveToken(null));
   }, [authenticatedUser?.role, authenticatedUser?.patientId]);
   useEffect(() => {
     let active = true;
@@ -370,14 +409,14 @@ function App() {
       setAuthenticatedUser({ name: session.name, role: session.role, patientId: session.patientId, doctorId: session.doctorId, hospitalId: session.hospitalId, demo: session.demo });
       if (page === "login") setPage(session.role === "staff" ? "doctor-dashboard" : session.role === "admin" ? "admin-dashboard" : "dashboard");
     }).catch(() => {
-      if (active && page.startsWith("doctor-") || active && page.startsWith("admin-") || active && ["dashboard", "documents", "hospital-token", "live-queue", "records", "profile"].includes(page)) setPage("login");
+      if (active && page.startsWith("doctor-") || active && page.startsWith("admin-") || active && ["dashboard", "documents", "find-doctor", "hospital-token", "live-queue", "records", "faq", "help", "profile"].includes(page)) setPage("login");
     }).finally(() => { if (active) setSessionChecked(true); });
     return () => { active = false; };
   }, []);
   useEffect(() => {
     if (!sessionChecked) return;
     const role = authenticatedUser?.role;
-    if (!role && (page.startsWith("doctor-") || page.startsWith("admin-") || ["dashboard", "documents", "hospital-token", "live-queue", "records", "profile"].includes(page))) setPage("login");
+    if (!role && (page.startsWith("doctor-") || page.startsWith("admin-") || ["dashboard", "documents", "find-doctor", "hospital-token", "live-queue", "records", "faq", "help", "profile"].includes(page))) setPage("login");
     if (role === "patient" && (page.startsWith("doctor-") || page.startsWith("admin-"))) setPage("dashboard");
     if (role === "staff" && !page.startsWith("doctor-")) setPage("doctor-dashboard");
     if (role === "admin" && !page.startsWith("admin-")) setPage("admin-dashboard");
@@ -389,11 +428,37 @@ function App() {
     platformRequest(`/api/public/queue-status/${tokenId}`).then((data) => setPublicQueueStatus(data.queue)).catch((error) => setPlatformError(error.message)).finally(() => setPlatformLoading(false));
   }, [page]);
   useEffect(() => {
-    if (!activeToken?.doctorId || ["completed", "cancelled"].includes(activeToken.status) || page !== "live-queue") return;
-    const refresh = async () => { try { const data = await queueRequest(`/api/tokens/${activeToken.id}`); setActiveToken((previous) => ({ ...previous, ...data.token })); } catch (error) { setQueueError(error.message); } };
+    if (!activeToken?.doctorId || ["completed", "cancelled"].includes(activeToken.status) || !["dashboard", "hospital-token", "live-queue"].includes(page)) return;
+    const refresh = async () => { try { const data = await queueRequest(`/api/tokens/${activeToken.id}`); if (["completed", "cancelled"].includes(data.token?.status)) { setActiveToken(null); if (data.token.status === "completed") setPlatformNotice("Your assessment has been completed."); } else { setActiveToken((previous) => ({ ...previous, ...data.token })); } setLastQueueUpdated(new Date()); } catch (error) { setQueueError(error.message); } };
     refresh(); const interval = window.setInterval(refresh, 8000);
     return () => window.clearInterval(interval);
   }, [activeToken?.doctorId, activeToken?.id, page]);
+
+  useEffect(() => {
+    if (page !== "records" || authenticatedUser?.role !== "patient" || !assessmentId) return;
+    setPatientClinicalReviewState("loading"); setPatientClinicalReview(null);
+    platformRequest(`/api/patient/assessments/${assessmentId}/clinical-review`).then((data) => { setPatientClinicalReview(data.review); setPatientClinicalReviewState("ready"); }).catch((error) => { setPatientClinicalReviewState(error.message === "Physician review is not available yet." ? "pending" : "error"); if (error.message !== "Physician review is not available yet.") setPlatformError(error.message); });
+  }, [page, authenticatedUser?.role, assessmentId]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => { if (event.key === "Escape") setShowAccessibility(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const currentToken = activeToken?.displayCurrentToken || activeToken?.currentToken;
+    if (!currentToken) return;
+    const token = String(currentToken);
+    if (lastAnnouncedQueueTokenRef.current === null) {
+      lastAnnouncedQueueTokenRef.current = token;
+      return;
+    }
+    if (lastAnnouncedQueueTokenRef.current !== token) {
+      lastAnnouncedQueueTokenRef.current = token;
+      if (accessibility.guidedAudio) speak(`Now serving token ${token}.`);
+    }
+  }, [activeToken?.displayCurrentToken, activeToken?.currentToken, accessibility.guidedAudio]);
 
   useEffect(() => {
     localStorage.setItem("medx-accessibility", JSON.stringify(accessibility));
@@ -544,9 +609,105 @@ function App() {
 
   async function openStaffAssessment(tokenId) {
     setPlatformLoading(true); setPlatformError("");
-    try { setSelectedStaffToken(await platformRequest(`/api/staff/tokens/${tokenId}/assessment`)); setPage("doctor-assessments"); }
+    try {
+      const [assessment, reviewData] = await Promise.all([platformRequest(`/api/staff/tokens/${tokenId}/assessment`), platformRequest(`/api/staff/tokens/${tokenId}/review`)]);
+      setSelectedStaffToken(assessment); setSelectedStaffTokenId(tokenId); setPhysicianReview(reviewData.review); setReviewDraft(JSON.stringify(reviewData.review?.reviewed_summary || assessment.clinicalSummary?.english_summary || {}, null, 2)); setPage("doctor-assessments");
+    }
     catch (error) { setPlatformError(error.message); }
     finally { setPlatformLoading(false); }
+  }
+
+  async function savePhysicianReview(finalize = false) {
+    if (!selectedStaffTokenId || physicianReview?.status === "finalized") return;
+    let reviewedSummary;
+    try { reviewedSummary = JSON.parse(reviewDraft); } catch { setPlatformError("The physician-reviewed summary must be valid JSON."); return; }
+    setReviewSaving(true); setPlatformError("");
+    try {
+      const saved = await platformRequest(`/api/staff/tokens/${selectedStaffTokenId}/review`, { method: "PUT", body: JSON.stringify({ reviewedSummary }) });
+      if (finalize) {
+        if (!window.confirm("After finalization, this physician-reviewed summary cannot be edited. Continue?")) { setPhysicianReview(saved.review); return; }
+        const finalized = await platformRequest(`/api/staff/tokens/${selectedStaffTokenId}/review/finalize`, { method: "POST" });
+        setPhysicianReview(finalized.review); setPlatformNotice("Physician review finalized and patient completed."); setSelectedStaffToken(null); setSelectedStaffTokenId(null); await loadStaffDashboard(); setPage("doctor-queue");
+      } else { setPhysicianReview(saved.review); setPlatformNotice("Physician review draft saved."); }
+    } catch (error) { setPlatformError(error.message); } finally { setReviewSaving(false); }
+  }
+
+  async function viewDoctorDocument(documentId) {
+    if (!selectedStaffTokenId || !documentId) return;
+    try {
+      setPlatformError("");
+      const response = await fetch(`${API_URL}/api/staff/tokens/${selectedStaffTokenId}/documents/${documentId}/view`, { credentials: "include" });
+      if (!response.ok) throw new Error("Unable to open this document.");
+      const file = await response.blob();
+      if (!file.size) throw new Error("Unable to open this document.");
+      const document = selectedStaffToken?.documents?.find((item) => item.id === documentId);
+      setDocumentPreview({
+        name: document?.file_name || "Medical document",
+        type: document?.file_type || file.type || "application/octet-stream",
+        size: document?.file_size || file.size,
+        url: URL.createObjectURL(file),
+      });
+    } catch {
+      setPlatformError("Unable to open this document.");
+    }
+  }
+
+  function closeDocumentPreview() {
+    if (documentPreview?.url) URL.revokeObjectURL(documentPreview.url);
+    setDocumentPreview(null);
+  }
+
+  function renderDocumentPreview() {
+    if (!documentPreview) return null;
+    const isPdf = documentPreview.type === "application/pdf" || documentPreview.name.toLowerCase().endsWith(".pdf");
+    return <div className="document-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDocumentPreview(); }}><section className="document-preview-modal" role="dialog" aria-modal="true" aria-labelledby="document-preview-title"><header><div><strong id="document-preview-title">{documentPreview.name}</strong><span>{documentPreview.type} · {Math.max(1, Math.round(documentPreview.size / 1024))} KB</span></div><button type="button" className="document-preview-close" aria-label="Close document preview" onClick={closeDocumentPreview}><X size={20} /></button></header><div className="document-preview-body">{isPdf ? <iframe title={`Preview of ${documentPreview.name}`} src={documentPreview.url} /> : <img src={documentPreview.url} alt={`Preview of ${documentPreview.name}`} />}</div></section></div>;
+  }
+
+  function renderDocumentScanner(document, variant = "compact") {
+    if (!document) return <div className={`document-scanner ${variant} scanner-empty`}><FileText size={variant === "feature" ? 40 : 25} /><span>No document selected</span></div>;
+    const isImage = document.type?.startsWith("image/") && document.previewUrl;
+    return <div className={`document-scanner ${variant}`} aria-label={`Processing ${document.name}`}>
+      <div className="document-scanner-preview">{isImage ? <img src={document.previewUrl} alt="" /> : <FileText size={variant === "feature" ? 46 : 26} aria-hidden="true" />}</div>
+      <span className="document-scanner-beam" aria-hidden="true" />
+      <div className="document-scanner-caption"><Sparkles size={15} aria-hidden="true" /><span>{variant === "feature" ? "Analyzing medical document" : "Scanning document"}</span></div>
+    </div>;
+  }
+
+  function clearDemoAssessmentState() {
+    setAssessmentId(null);
+    setActiveToken(null);
+    setSelectedHospitalId("");
+    setSelectedDepartment("");
+    setQueueDoctors([]);
+    setClinicalSummary(null);
+    setIntakeDocuments([]);
+    setDocuments([]);
+    setIntakeStep(1);
+    setConsent({ health: false, audio: false, documents: false });
+    setIntakeData({ bodySystem: "", symptoms: [], severity: 5, duration: "", progression: "", medicalConditionsHas: "no", medicalConditionsText: "", medicationsHas: "no", medicationsText: "", allergiesHas: "no", previousSimilar: "no", recentInjuryHas: "no", recentInjuryText: "", additionalInformation: "" });
+    setAssessmentError("");
+    setAssessmentSaveError("");
+    setClinicalSummarySaveError("");
+    setQueueError("");
+  }
+
+  async function resetDemoData() {
+    if (!authenticatedUser?.demo || resettingDemo) return;
+    setResettingDemo(true);
+    setDemoResetNotice("");
+    try {
+      const data = await platformRequest("/api/demo/reset", { method: "POST" });
+      clearDemoAssessmentState();
+      setShowDemoResetConfirm(false);
+      setProfileMenuOpen(false);
+      setDemoResetNotice(data.message || "Demo data reset successfully.");
+      setPlatformNotice(data.message || "Demo data reset successfully.");
+      setPage("dashboard");
+    } catch (error) {
+      setDemoResetNotice(error.message || "Unable to reset demo data. Please try again.");
+    } finally {
+      setResettingDemo(false);
+    }
   }
 
   async function toggleDoctor(doctor) {
@@ -614,7 +775,7 @@ function App() {
   function loadDemoHealthData() {
     setIntakeData((previous) => ({ ...previous, bodySystem: "heart", symptoms: ["chest_discomfort", "breath_on_exertion", "fatigue"], severity: 7, duration: "1_3d", progression: "getting_worse", medicalConditionsHas: "yes", medicalConditionsText: "Hypertension (patient reported)", medicationsHas: "yes", medicationsText: "Medication details not provided", allergiesHas: "no", previousSimilar: "no", recentInjuryHas: "no", additionalInformation: "Reports discomfort with routine activity." }));
     setIntakeDocuments([{ id: "demo-doc-1", name: "Blood_Report.pdf", type: "application/pdf", size: 248000, status: "processed", extractedText: "Previous laboratory report available.", extractedData: {} }, { id: "demo-doc-2", name: "Prescription.pdf", type: "application/pdf", size: 126000, status: "processed", extractedText: "Previous medication information available.", extractedData: {} }]);
-    setClinicalSummary({ chief_concern: "Patient reports chest discomfort with exertional shortness of breath for 1Ã¢â‚¬â€œ3 days.", clinical_presentation: "Patient-reported cardiac symptoms include chest discomfort, exertional dyspnea, and fatigue, rated 7/10 and worsening.", history_of_present_illness: "Symptoms have been present for 1Ã¢â‚¬â€œ3 days with a worsening course. The patient reports discomfort during routine activity.", relevant_medical_history: "Hypertension reported by the patient.", current_medications: "Medication details not provided.", allergies: "No known allergies reported.", document_derived_information: "A previous laboratory report and prescription were uploaded; extracted details should be reviewed with the original documents.", clinician_review_notes: "Reported worsening symptoms and severity are documented for clinician review; this is not a diagnosis." });
+    setClinicalSummary({ chief_concern: "Patient reports chest discomfort with exertional shortness of breath for 1–3 days.", clinical_presentation: "Patient-reported cardiac symptoms include chest discomfort, exertional dyspnea, and fatigue, rated 7/10 and worsening.", history_of_present_illness: "Symptoms have been present for 1–3 days with a worsening course. The patient reports discomfort during routine activity.", relevant_medical_history: "Hypertension reported by the patient.", current_medications: "Medication details not provided.", allergies: "No known allergies reported.", document_derived_information: "A previous laboratory report and prescription were uploaded; extracted details should be reviewed with the original documents.", clinician_review_notes: "Reported worsening symptoms and severity are documented for clinician review; this is not a diagnosis." });
   }
 
   // =====================================================
@@ -892,11 +1053,11 @@ function App() {
   function getDurationEnLabel(durationId) {
     const labels = {
       less_1h: "Less than 1 hour",
-      "1_6h": "1Ã¢â‚¬â€œ6 hours",
-      "6_24h": "6Ã¢â‚¬â€œ24 hours",
-      "1_3d": "1Ã¢â‚¬â€œ3 days",
-      "4_7d": "4Ã¢â‚¬â€œ7 days",
-      "1_4w": "1Ã¢â‚¬â€œ4 weeks",
+      "1_6h": "1–6 hours",
+      "6_24h": "6–24 hours",
+      "1_3d": "1–3 days",
+      "4_7d": "4–7 days",
+      "1_4w": "1–4 weeks",
       over_1m: "More than 1 month",
     };
     return labels[durationId] || durationId;
@@ -1023,7 +1184,27 @@ function App() {
     return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
   }
 
+  function readDocumentAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error || new Error("Unable to read the original document."));
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === "string" ? reader.result : "";
+        const separator = dataUrl.indexOf(",");
+        if (separator < 0) return reject(new Error("Unable to read the original document."));
+        return resolve(dataUrl.slice(separator + 1));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function processIntakeDocument(document) {
+    if (document.size > MAX_DOCUMENT_SIZE_BYTES) {
+      setIntakeDocuments((previous) => previous.map((item) => (
+        item.id === document.id ? { ...item, status: "failed", error: DOCUMENT_SIZE_ERROR } : item
+      )));
+      return;
+    }
     setIntakeDocuments((previous) => previous.map((item) => (
       item.id === document.id ? { ...item, status: "processing", error: "" } : item
     )));
@@ -1042,6 +1223,7 @@ function App() {
       processedResult = { extractedText: data.extractedText || "", extractedData: data.data || {}, extractionMethod };
       let persistedDocument = null;
       if (!assessmentId) throw new Error("This assessment is not available. Please start a new assessment.");
+      const originalFileBase64 = await readDocumentAsBase64(document.file);
       const persistence = await assessmentRequest(`/api/assessments/${assessmentId}/documents`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1052,6 +1234,7 @@ function App() {
           extractedText: processedResult.extractedText,
           extractionMethod,
           findings: processedResult.extractedData,
+          originalFileBase64,
         }),
       });
       persistedDocument = persistence.document;
@@ -1062,35 +1245,59 @@ function App() {
           : item
       )));
     } catch (error) {
+      console.error("Intake document processing error:", error);
+      const safeError = error?.message === DOCUMENT_SIZE_ERROR
+        ? DOCUMENT_SIZE_ERROR
+        : "Unable to process this document. Please try again.";
       setIntakeDocuments((previous) => previous.map((item) => (
         item.id === document.id
-          ? { ...item, ...processedResult, status: "failed", error: error.message || t("intakeFlow.documentProcessingFailed") }
+          ? { ...item, ...processedResult, status: "failed", error: safeError }
           : item
       )));
     }
   }
 
   function addIntakeDocuments(fileList) {
-    const supportedFiles = Array.from(fileList).filter((file) => (
+    const selectedFiles = Array.from(fileList);
+    const supportedFiles = selectedFiles.filter((file) => (
       ["application/pdf", "image/jpeg", "image/png"].includes(file.type)
-    ));
+    ) && file.size <= MAX_DOCUMENT_SIZE_BYTES);
+    const oversizedDocuments = selectedFiles.filter((file) => (
+      ["application/pdf", "image/jpeg", "image/png"].includes(file.type) && file.size > MAX_DOCUMENT_SIZE_BYTES
+    )).map((file) => ({
+      id: `${Date.now()}-${file.name}-${Math.random()}`,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      file,
+      previewUrl: "",
+      status: "failed",
+      extractedText: "",
+      extractedData: {},
+      error: DOCUMENT_SIZE_ERROR,
+    }));
     const newDocuments = supportedFiles.map((file) => ({
       id: `${Date.now()}-${file.name}-${Math.random()}`,
       name: file.name,
       type: file.type || "application/octet-stream",
       size: file.size,
       file,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
       status: "processing",
       extractedText: "",
       extractedData: {},
       error: "",
     }));
-    setIntakeDocuments((previous) => [...previous, ...newDocuments]);
+    setIntakeDocuments((previous) => [...previous, ...oversizedDocuments, ...newDocuments]);
     newDocuments.forEach(processIntakeDocument);
   }
 
   function removeIntakeDocument(id) {
-    setIntakeDocuments((previous) => previous.filter((document) => document.id !== id));
+    setIntakeDocuments((previous) => {
+      const removed = previous.find((document) => document.id === id);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return previous.filter((document) => document.id !== id);
+    });
   }
 
   function confirmMedicalHistory() {
@@ -1109,7 +1316,7 @@ function App() {
     };
 
     setDocuments((prev) => [intakeDoc, ...prev]);
-    setPage("hospital-token");
+    setPage("find-doctor");
   }
 
   // =====================================================
@@ -1133,7 +1340,13 @@ function App() {
 
       audioChunksRef.current = [];
 
-      const recorder = new MediaRecorder(stream);
+      const preferredMimeTypes = ["audio/webm;codecs=opus", "audio/webm"];
+      const recorderMimeType = preferredMimeTypes.find((mimeType) => (
+        typeof MediaRecorder.isTypeSupported !== "function" || MediaRecorder.isTypeSupported(mimeType)
+      ));
+      const recorder = recorderMimeType
+        ? new MediaRecorder(stream, { mimeType: recorderMimeType })
+        : new MediaRecorder(stream);
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -1150,9 +1363,15 @@ function App() {
 
         stream.getTracks().forEach((track) => track.stop());
 
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/webm",
-        });
+        const audioMimeType = recorder.mimeType || audioChunksRef.current[0]?.type || "audio/webm";
+        const audioBlob = new Blob(audioChunksRef.current, { type: audioMimeType });
+        mediaRecorderRef.current = null;
+
+        if (audioBlob.size === 0) {
+          console.warn("Sarvam STT recording completed without audio bytes.");
+          setSpeechError(t("speechErrors.convertFailed"));
+          return;
+        }
 
         const formData = new FormData();
         formData.append("audio", audioBlob, "recording.webm");
@@ -1160,19 +1379,28 @@ function App() {
 
         try {
           setSpeechError("");
+          console.info("Sending voice recording for transcription:", {
+            audioSizeBytes: audioBlob.size,
+            mimeType: audioBlob.type,
+            language: form.language,
+          });
 
           const response = await fetch(`${API_URL}/api/sarvam/stt`, {
             method: "POST",
             body: formData,
           });
 
-          const data = await response.json();
+          const data = await response.json().catch(() => ({}));
 
           if (!response.ok || !data.success) {
             throw new Error(data.error || "Speech recognition failed");
           }
 
-          if (data.transcript) setVoiceDraft(data.transcript);
+          const transcript = String(data.transcript ?? "").trim();
+          if (!transcript) {
+            throw new Error("Speech recognition returned an empty transcript");
+          }
+          setVoiceDraft(transcript);
         } catch (error) {
           console.error("Sarvam STT error:", error);
           setSpeechError(t("speechErrors.convertFailed"));
@@ -1219,12 +1447,23 @@ function App() {
   function handleFileChange(event) {
     const file = event.target.files[0];
     if (file) {
+      if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
+        setSelectedFile(null);
+        setExtractionError(DOCUMENT_SIZE_ERROR);
+        event.target.value = "";
+        return;
+      }
+      setExtractionError("");
       setSelectedFile(file);
     }
   }
 
   async function uploadDocument() {
     if (!selectedFile) return;
+    if (selectedFile.size > MAX_DOCUMENT_SIZE_BYTES) {
+      setExtractionError(DOCUMENT_SIZE_ERROR);
+      return;
+    }
 
     try {
       setExtracting(true);
@@ -1353,12 +1592,25 @@ function App() {
   // Shared by every patient portal route. Intake and consent deliberately use
   // their dedicated layouts, while portal pages retain this persistent shell.
   function renderPatientSidebar() {
-    const patientNav = [["dashboard", LayoutDashboard, t("auth.dashboard")], ["documents", FileText, t("auth.medicalDocuments")], ["records", ClipboardList, t("medicalRecords")], ["profile", UserRound, t("auth.profile")]];
-    return <aside className="patient-sidebar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav aria-label={t("platform.patientNavigation")}>{patientNav.map(([target, Icon, label]) => <button type="button" key={target} className={page === target ? "active" : ""} aria-current={page === target ? "page" : undefined} onClick={() => setPage(target)}><Icon size={18} /><span>{label}</span></button>)}</nav><div className="patient-sidebar-accessibility">{renderAccessibilityControls()}</div><button type="button" className="patient-logout" onClick={logOut}><LogOut size={18} />{t("auth.logout")}</button></aside>;
+    const patientNav = [["dashboard", LayoutDashboard, t("platform.patientDashboard")], ["records", ClipboardList, t("medicalRecords")], ["find-doctor", Stethoscope, t("platform.findDoctor")], ["documents", FileText, t("platform.medicalDocuments")], ["faq", CircleHelp, t("platform.helpFaq")]];
+    return <aside className="patient-sidebar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav aria-label={t("platform.patientNavigation")}>{patientNav.map(([target, Icon, label]) => <button type="button" key={target} className={page === target || (target === "faq" && page === "help") ? "active" : ""} aria-current={page === target ? "page" : undefined} onClick={() => setPage(target)}><Icon size={18} /><span>{label}</span></button>)}</nav><div className="patient-sidebar-accessibility">{renderAccessibilityControls()}</div><button type="button" className="patient-logout" onClick={logOut}><LogOut size={18} /><span>{t("auth.logout")}</span></button></aside>;
+  }
+
+  function renderPatientHeaderActions() {
+    return <div className="patient-header-actions"><LanguageSwitcher setForm={setForm} /><div className="patient-profile-menu"><button type="button" className="patient-profile-trigger" aria-label={t("platform.openProfileMenu")} aria-haspopup="menu" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((open) => !open)}><UserRound size={17} /><span>{t("auth.profile")}</span></button>{profileMenuOpen && <div className="patient-profile-popover" role="menu" onKeyDown={(event) => { if (event.key === "Escape") setProfileMenuOpen(false); }}><strong>{authenticatedUser?.name || t("platform.patient")}</strong><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setPage("profile"); }}><UserRound size={16} />{t("auth.profile")}</button><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setPage("records"); }}><ClipboardList size={16} />{t("medicalRecords")}</button>{authenticatedUser?.demo && <button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setDemoResetNotice(""); setShowDemoResetConfirm(true); setPage("profile"); }}><RotateCcw size={16} />{t("platform.resetDemoData")}</button>}<button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); logOut(); }}><LogOut size={16} />{t("auth.logout")}</button></div>}</div></div>;
+  }
+
+  function renderDoctorSidebar() {
+    const navGroups = [
+      ["Workspace", [["doctor-dashboard", LayoutDashboard, t("auth.dashboard")], ["doctor-queue", Ticket, "Patient Queue"], ["doctor-patients", Users, "Current Patient"]]],
+      ["Clinical", [["doctor-assessments", ClipboardList, t("platform.assessments")]]],
+      ["Account", [["doctor-profile", UserRound, t("auth.profile")]]],
+    ];
+    return <aside className="doctor-sidebar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav aria-label={t("platform.doctorNavigation")}>{navGroups.map(([heading, items]) => <section className="doctor-nav-section" key={heading}><p>{heading}</p>{items.map(([target, Icon, label]) => <button type="button" key={target} className={page === target ? "active" : ""} aria-current={page === target ? "page" : undefined} onClick={() => setPage(target)}><Icon size={18} /><span>{label}</span></button>)}</section>)}</nav><button type="button" className="doctor-logout" onClick={logOut}><LogOut size={18} />{t("auth.logout")}</button></aside>;
   }
 
   useEffect(() => {
-    const paths = { login: "/login", register: "/register", otp: "/otp", "profile-setup": "/profile", dashboard: "/dashboard", documents: "/documents", records: "/medical-records", profile: "/profile", "hospital-token": "/hospital-token", "live-queue": "/live-queue", "doctor-dashboard": "/doctor-dashboard", "doctor-queue": "/doctor-queue", "doctor-patients": "/doctor-patients", "doctor-assessments": "/doctor-assessments", "doctor-profile": "/doctor-profile", "admin-dashboard": "/admin-dashboard", "admin-hospitals": "/admin-hospitals", "admin-doctors": "/admin-doctors", "admin-queues": "/admin-queues", "admin-patients": "/admin-patients", "admin-reports": "/admin-reports" };
+    const paths = { login: "/login", register: "/register", otp: "/otp", "profile-setup": "/profile", dashboard: "/dashboard", documents: "/documents", records: "/medical-records", "find-doctor": "/find-doctor", faq: "/faq", help: "/help", profile: "/profile", "hospital-token": "/hospital-token", "live-queue": "/live-queue", "doctor-dashboard": "/doctor-dashboard", "doctor-queue": "/doctor-queue", "doctor-patients": "/doctor-patients", "doctor-assessments": "/doctor-assessments", "doctor-documents": "/doctor-documents", "doctor-review": "/doctor-review", "doctor-profile": "/doctor-profile", "admin-dashboard": "/admin-dashboard", "admin-hospitals": "/admin-hospitals", "admin-doctors": "/admin-doctors", "admin-queues": "/admin-queues", "admin-patients": "/admin-patients", "admin-reports": "/admin-reports" };
     Object.assign(paths, { "admin-assessments": "/admin-assessments", "admin-profile": "/admin-profile" });
     if (paths[page]) window.history.replaceState(null, "", paths[page]);
   }, [page]);
@@ -1372,6 +1624,8 @@ function App() {
     return (
       <div className="auth-page">
         <nav className="navbar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><LanguageSwitcher setForm={setForm} /></nav>
+        <div className="auth-layout">
+        {isLogin && <section className="auth-hero" aria-labelledby="auth-hero-title"><span className="auth-hero-eyebrow"><Sparkles size={15} /> Connected care, thoughtfully organized</span><h1 id="auth-hero-title">A clearer path from symptoms to care.</h1><p>MedFlow helps patients share structured health information, add supporting documents, and coordinate their next care step with confidence.</p><div className="auth-feature-grid"><article><Mic size={19} /><strong>Voice-enabled intake</strong><span>Answer in the way that feels easiest.</span></article><article><FileText size={19} /><strong>Document processing</strong><span>Keep relevant records with your assessment.</span></article><article><Activity size={19} /><strong>Structured summaries</strong><span>Information prepared for clinical review.</span></article><article><Ticket size={19} /><strong>Live queue coordination</strong><span>Follow your OPD token in one place.</span></article></div><p className="auth-hero-note"><ShieldCheck size={16} /> Designed for accessible, patient-controlled care journeys.</p></section>}
         <main className="auth-card">
           <span className="auth-prototype">{t("auth.prototype")}</span>
           {isLogin && <>
@@ -1410,6 +1664,7 @@ function App() {
           </>}
           <div className="auth-privacy"><ShieldCheck size={15} />{t("auth.privacy")}</div>
         </main>
+        </div>
       </div>
     );
   }
@@ -1418,14 +1673,16 @@ function App() {
     const documentsForAssessment = selectedStaffToken.documents || [];
     const clinicalSummary = selectedStaffToken.clinicalSummary?.english_summary || null;
     return (
-      <div className="role-workspace">
-        <header className="role-topbar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav><button onClick={() => setPage("doctor-dashboard")}>{t("auth.dashboard")}</button><button className="active" aria-current="page">{t("platform.patientAssessment")}</button><button onClick={logOut}>{t("auth.logout")}</button></nav></header>
-        <main className="role-main clinical-workspace">
+      <div className="doctor-shell">
+        {renderDoctorSidebar()}
+        <main className="doctor-main">
+          <header className="doctor-workspace-header"><div><p className="eyebrow">Clinical</p><strong>{t("platform.patientAssessment")}</strong><span>{selectedStaffToken.patient?.name || t("platform.notReported")}</span></div></header>
+          <section className="doctor-content clinical-workspace">
           {platformError && <p className="speech-error" role="alert">{platformError}</p>}
-          <button className="btn-secondary" onClick={() => setPage("doctor-dashboard")}>{t("back")}</button>
+          <button className="btn-secondary doctor-assessment-back" onClick={() => setPage("doctor-assessments")}><ArrowLeft size={17} />Back to Assessments</button>
           <p className="eyebrow">{t("platform.patientAssessment")}</p>
           <h1>{selectedStaffToken.patient?.name || t("platform.notReported")}</h1>
-          <p className="muted">{selectedStaffToken.patient?.age || t("platform.notReported")} Ã‚Â· {selectedStaffToken.patient?.gender || t("platform.notReported")} Ã‚Â· {selectedStaffToken.assessment?.created_at ? new Date(selectedStaffToken.assessment.created_at).toLocaleDateString() : t("platform.notReported")}</p>
+          <p className="muted">{selectedStaffToken.patient?.age || t("platform.notReported")} · {selectedStaffToken.patient?.gender || t("platform.notReported")} · {selectedStaffToken.assessment?.created_at ? new Date(selectedStaffToken.assessment.created_at).toLocaleDateString() : t("platform.notReported")}</p>
           <div className="assessment-detail-grid">
             <Card><SectionHeader title={t("platform.assessment")} /><p><strong>{t("intakeFlow.bodySystem")}:</strong> {selectedStaffToken.assessment?.body_system || t("platform.notReported")}</p><p><strong>{t("intakeFlow.symptoms")}:</strong> {selectedStaffToken.symptoms?.map((item) => item.name).join(", ") || t("platform.notReported")}</p><p><strong>{t("intakeFlow.reviewSeverity")}:</strong> {selectedStaffToken.assessment?.severity ?? t("platform.notReported")}</p><p><strong>{t("intakeFlow.duration")}:</strong> {selectedStaffToken.assessment?.duration || t("platform.notReported")}</p><p><strong>{t("intakeFlow.progression")}:</strong> {selectedStaffToken.assessment?.progression || t("platform.notReported")}</p></Card>
             <Card><SectionHeader title={t("platform.clinicalHistory")} /><p><strong>{t("platform.conditions")}:</strong> {selectedStaffToken.clinicalHistory?.existing_conditions || t("platform.notReported")}</p><p><strong>{t("platform.medications")}:</strong> {selectedStaffToken.clinicalHistory?.medications || t("platform.notReported")}</p><p><strong>{t("platform.allergies")}:</strong> {selectedStaffToken.clinicalHistory?.allergies || t("platform.notReported")}</p><p><strong>{t("platform.previousEpisodes")}:</strong> {selectedStaffToken.clinicalHistory?.previous_similar_symptoms || t("platform.notReported")}</p><p><strong>{t("platform.injurySurgery")}:</strong> {selectedStaffToken.clinicalHistory?.previous_injury_surgery || t("platform.notReported")}</p><p><strong>{t("platform.additionalRemarks")}:</strong> {selectedStaffToken.clinicalHistory?.additional_remarks || t("platform.notReported")}</p></Card>
@@ -1434,11 +1691,14 @@ function App() {
             <SectionHeader eyebrow={t("platform.patientAssessment")} title={t("platform.uploadedMedicalRecords")} />
             {documentsForAssessment.length ? <div className="staff-document-list">{documentsForAssessment.map((document) => {
               const hasExtraction = Boolean(document.extracted_text || document.findings?.length);
-              return <article key={document.id} className="staff-document-item"><div className="staff-document-title"><FileText size={20} /><div><strong>{document.file_name}</strong><span>{document.file_type || t("platform.medicalDocument")}{document.extraction_method ? ` Ã‚Â· ${document.extraction_method}` : ""}</span></div><StatusBadge status={hasExtraction ? "success" : "neutral"}>{hasExtraction ? t("platform.analysed") : t("platform.noFindings")}</StatusBadge></div>{document.findings?.length ? <div className="document-findings"><strong>{t("platform.findings")}</strong><ul>{document.findings.slice(0, 8).map((finding, index) => <li key={`${document.id}-${index}`}>{finding.finding_type ? `${finding.finding_type}: ` : ""}{finding.finding_text}</li>)}</ul>{document.findings.length > 8 && <p className="muted">{t("platform.additionalFindings", { count: document.findings.length - 8 })}</p>}</div> : document.extracted_text ? <div className="document-findings"><strong>{t("platform.extractedInformation")}</strong><p>{document.extracted_text}</p></div> : <p className="muted">{t("platform.noDocumentFindings")}</p>}</article>;
+              return <article key={document.id} className="staff-document-item"><div className="staff-document-title"><FileText size={20} /><div><strong>{document.file_name}</strong><span>{document.file_type || t("platform.medicalDocument")}{document.extraction_method ? ` · ${document.extraction_method}` : ""}</span></div><StatusBadge status={hasExtraction ? "success" : "neutral"}>{hasExtraction ? t("platform.analysed") : t("platform.noFindings")}</StatusBadge></div><button type="button" className="btn-secondary staff-document-view" onClick={() => viewDoctorDocument(document.id)}>View Document</button></article>;
             })}</div> : <EmptyState title={t("platform.noDocumentsForAssessment")} detail={t("platform.noDocumentsForAssessmentDetail")} />}
           </Card>
-          <Card className="summary-card"><SectionHeader title={t("platform.aiClinicalSummary")} />{clinicalSummary ? <div className="doctor-summary-grid"><div><strong>{t("platform.chiefComplaint")}</strong><p>{clinicalSummary.chiefComplaint || t("platform.notReported")}</p></div><div><strong>{t("platform.historyOfPresentingComplaint")}</strong><p>{clinicalSummary.historyOfPresentingComplaint || t("platform.notReported")}</p></div><div><strong>{t("intakeFlow.symptoms")}</strong><p>{clinicalSummary.symptoms?.join(", ") || t("platform.notReported")}</p></div><div><strong>{t("platform.severityDurationProgression")}</strong><p>{[clinicalSummary.severity, clinicalSummary.duration, clinicalSummary.progression].filter(Boolean).join(" Ã‚Â· ") || t("platform.notReported")}</p></div><div><strong>{t("platform.documentFindings")}</strong><p>{clinicalSummary.relevantDocumentFindings?.join(", ") || t("platform.notReported")}</p></div><div><strong>{t("platform.missingInformation")}</strong><p>{clinicalSummary.missingInformation?.join(", ") || t("platform.notReported")}</p></div></div> : <p>{t("platform.noSummary")}</p>}<p className="muted">{t("platform.physicianReviewOnly")}</p></Card>
+          <Card className="summary-card"><SectionHeader eyebrow={t("platform.aiGeneratedSummary")} title={t("platform.aiClinicalSummary")} />{clinicalSummary ? <div className="doctor-summary-grid"><div><strong>{t("platform.chiefComplaint")}</strong><p>{clinicalSummary.chiefComplaint || t("platform.notReported")}</p></div><div><strong>{t("platform.historyOfPresentingComplaint")}</strong><p>{clinicalSummary.historyOfPresentingComplaint || t("platform.notReported")}</p></div><div><strong>{t("intakeFlow.symptoms")}</strong><p>{clinicalSummary.symptoms?.join(", ") || t("platform.notReported")}</p></div></div> : <p>{t("platform.noSummary")}</p>}<p className="muted">{t("platform.readOnlyOriginalOutput")}</p></Card>
+          <Card className="summary-card"><SectionHeader eyebrow="Physician Review" title={physicianReview?.status === "finalized" ? "✓ Physician Review Finalized" : "Draft"} actions={<StatusBadge status={physicianReview?.status === "finalized" ? "success" : "neutral"}>{physicianReview?.status || "NOT STARTED"}</StatusBadge>} />{physicianReview?.status === "finalized" ? <><div className="doctor-summary-grid">{Object.entries(physicianReview.reviewed_summary || {}).filter(([, value]) => Array.isArray(value) ? value.length : value).map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</strong><p>{Array.isArray(value) ? value.join(", ") : String(value)}</p></div>)}</div><p className="muted">Finalized by {authenticatedUser.name} on {new Date(physicianReview.finalized_at).toLocaleString()}.</p></> : <>{(() => { let fields = {}; try { fields = JSON.parse(reviewDraft || "{}"); } catch { fields = {}; } return <div className="review-field-grid">{Object.entries(fields).map(([key, value]) => <label key={key}><span>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</span><textarea value={Array.isArray(value) ? value.join("\n") : String(value ?? "")} onChange={(event) => { const next = { ...fields, [key]: Array.isArray(value) ? event.target.value.split("\n").filter(Boolean) : event.target.value }; setReviewDraft(JSON.stringify(next)); }} disabled={reviewSaving} rows="3" /></label>)}</div>; })()}<div className="token-actions"><button type="button" className="btn-secondary" onClick={() => setReviewDraft(JSON.stringify(physicianReview?.reviewed_summary || clinicalSummary || {}))} disabled={reviewSaving}>Cancel</button><button type="button" className="btn-secondary" onClick={() => savePhysicianReview(false)} disabled={reviewSaving}>Save Draft</button><button type="button" className="btn-primary" onClick={() => savePhysicianReview(true)} disabled={reviewSaving}>Finalize Review</button></div></>}</Card>
+          </section>
         </main>
+        {renderDocumentPreview()}
       </div>
     );
   }
@@ -1448,28 +1708,31 @@ function App() {
     const waiting = staff?.waiting || [];
     const current = staff?.current || null;
     const queueTokens = [...(current ? [current] : []), ...waiting];
-    const navItems = [["doctor-dashboard", LayoutDashboard, t("auth.dashboard")], ["doctor-queue", Ticket, t("platform.queue")], ["doctor-patients", Users, t("platform.patients")], ["doctor-assessments", ClipboardList, t("platform.assessments")], ["doctor-profile", UserRound, t("auth.profile")]];
     const openToken = (token) => openStaffAssessment(token.id);
     const renderQueueRows = (tokens) => tokens.length ? <div className="doctor-queue-list">{tokens.map((token) => <article className="doctor-queue-row" key={token.id}><strong>{token.displayToken}</strong><div><span className="doctor-queue-patient">{token.patientName}</span><small>{t("platform.assessmentAvailable")}</small></div><StatusBadge status={token.status === "in_consultation" ? "success" : token.status === "called" ? "live" : "neutral"}>{t(`platform.tokenStatus.${token.status}`, { defaultValue: token.status })}</StatusBadge><div className="doctor-row-actions">{token.status === "called" && <button type="button" className="btn-secondary" onClick={() => updateStaffToken(token.id, "start")} disabled={platformLoading}>{t("platform.startConsultation")}</button>}<button type="button" className="btn-secondary" onClick={() => openToken(token)} disabled={platformLoading}>{t("platform.viewAssessment")}</button></div></article>)}</div> : <EmptyState title={t("platform.noWaitingPatients")} detail={t("platform.noWaitingPatientsDetail")} />;
     let content;
     if (page === "doctor-queue") {
-      content = <><SectionHeader eyebrow={t("platform.clinicalQueue")} title={t("platform.queueWorkspace")} actions={<button type="button" className="btn-secondary" onClick={loadStaffDashboard} disabled={platformLoading}>{t("platform.refresh")}</button>} /><div className="doctor-queue-overview"><Card><span>{t("platform.queueStatus")}</span><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || t("platform.notStarted")}</StatusBadge></Card><Card><span>{t("platform.nowServing")}</span><strong>{staff?.queue?.displayCurrentToken || t("platform.notStarted")}</strong></Card><Card><span>{t("platform.waiting")}</span><strong>{staff?.queue?.waitingCount || 0}</strong></Card></div>{current && <Card className="current-consultation-card"><SectionHeader eyebrow={t("platform.currentConsultation")} title={`${current.displayToken} Ã‚Â· ${current.patientName}`} actions={<button type="button" className="btn-secondary" onClick={() => openToken(current)}>{t("platform.openAssessment")}</button>} /><StatusBadge status="live">{t(`platform.tokenStatus.${current.status}`, { defaultValue: current.status })}</StatusBadge>{current.status === "called" && <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "start")} disabled={platformLoading}>{t("platform.startConsultation")}</button>}{current.status === "in_consultation" && <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "complete")} disabled={platformLoading}>{t("platform.completeConsultation")}</button>}</Card>}<Card><SectionHeader eyebrow={t("platform.nextInQueue")} title={t("platform.waitingPatients")} />{renderQueueRows(waiting)}</Card></>;
+      content = <><SectionHeader eyebrow={t("platform.clinicalQueue")} title={t("platform.queueWorkspace")} actions={<button type="button" className="btn-secondary" onClick={loadStaffDashboard} disabled={platformLoading}>{t("platform.refresh")}</button>} /><div className="doctor-queue-overview"><Card><span>{t("platform.queueStatus")}</span><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || t("platform.notStarted")}</StatusBadge></Card><Card><span>{t("platform.nowServing")}</span><strong>{staff?.queue?.displayCurrentToken || t("platform.notStarted")}</strong></Card><Card><span>{t("platform.waiting")}</span><strong>{staff?.queue?.waitingCount || 0}</strong></Card></div>{current && <Card className="current-consultation-card"><SectionHeader eyebrow={t("platform.currentConsultation")} title={`${current.displayToken} · ${current.patientName}`} actions={<button type="button" className="btn-secondary" onClick={() => openToken(current)}>{t("platform.openAssessment")}</button>} /><StatusBadge status="live">{t(`platform.tokenStatus.${current.status}`, { defaultValue: current.status })}</StatusBadge>{current.status === "called" && <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "start")} disabled={platformLoading}>{t("platform.startConsultation")}</button>}{current.status === "in_consultation" && <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "complete")} disabled={platformLoading}>{t("platform.completeConsultation")}</button>}</Card>}<Card><SectionHeader eyebrow={t("platform.nextInQueue")} title={t("platform.waitingPatients")} />{renderQueueRows(waiting)}</Card></>;
     } else if (page === "doctor-patients") {
       content = <><SectionHeader eyebrow={t("platform.clinicalQueue")} title={t("platform.authorizedPatients")} /><Card><p className="muted">{t("platform.authorizedPatientsDetail")}</p>{renderQueueRows(queueTokens)}</Card></>;
+    } else if (page === "doctor-documents") {
+      content = <><SectionHeader eyebrow="Clinical" title="Documents" /><Card><p className="muted">Open an authorized patient assessment to view its uploaded records and extracted findings.</p>{renderQueueRows(queueTokens)}</Card></>;
+    } else if (page === "doctor-review") {
+      content = <><SectionHeader eyebrow="Clinical" title="Physician Review" /><Card><p className="muted">Open an authorized patient assessment to review, save, or finalize its clinical summary.</p>{renderQueueRows(queueTokens)}</Card></>;
     } else if (page === "doctor-assessments") {
       content = <><SectionHeader eyebrow={t("platform.clinicalQueue")} title={t("platform.assessments")} /><Card><p className="muted">{t("platform.assessmentListDetail")}</p>{renderQueueRows(queueTokens)}</Card></>;
     } else if (page === "doctor-profile") {
       content = <><SectionHeader eyebrow={t("platform.clinicalWorkspace")} title={t("platform.doctorProfile")} /><div className="doctor-profile-grid"><Card><p><strong>{t("platform.doctorName")}:</strong> {staff?.doctor?.name || authenticatedUser.name}</p><p><strong>{t("platform.specialty")}:</strong> {staff?.doctor?.specialization || staff?.doctor?.department || t("platform.notReported")}</p><p><strong>{t("platform.hospital")}:</strong> {staff?.doctor?.hospitalName || t("platform.notReported")}</p><p><strong>{t("platform.role")}:</strong> {t("platform.doctorStaff")}</p></Card><Card><SectionHeader title={t("platform.queueStatus")} /><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || t("platform.notStarted")}</StatusBadge><p className="muted">{t("platform.profileSecurityNote")}</p></Card></div></>;
     } else {
-      content = <><SectionHeader eyebrow={t("platform.clinicalWorkspace")} title={`${t("platform.goodMorning")}, ${staff?.doctor?.name || authenticatedUser.name}`} actions={<button type="button" className="btn-primary" onClick={callNextPatient} disabled={platformLoading || !waiting.length}><PhoneCall size={17} />{t("platform.callNext")}</button>} /><p className="doctor-page-subtitle">{t("platform.doctorDashboardSubtitle")}</p><div className="doctor-stat-grid"><Card><span>{t("platform.waiting")}</span><strong>{staff?.queue?.waitingCount || 0}</strong></Card><Card><span>{t("platform.inConsultation")}</span><strong>{current?.status === "in_consultation" ? 1 : 0}</strong></Card><Card><span>{t("platform.completedToday")}</span><strong>{staff?.completedToday || 0}</strong></Card></div>{current && <Card className="current-consultation-card"><SectionHeader eyebrow={t("platform.currentConsultation")} title={`${current.displayToken} Ã‚Â· ${current.patientName}`} actions={<button type="button" className="btn-secondary" onClick={() => openToken(current)}>{t("platform.openAssessment")}</button>} /><StatusBadge status="live">{t(`platform.tokenStatus.${current.status}`, { defaultValue: current.status })}</StatusBadge>{current.status === "called" ? <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "start")} disabled={platformLoading}>{t("platform.startConsultation")}</button> : <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "complete")} disabled={platformLoading}>{t("platform.completeConsultation")}</button>}</Card>}<Card className="doctor-dashboard-queue"><SectionHeader eyebrow={t("platform.nextInQueue")} title={t("platform.waitingPatients")} actions={<button type="button" className="btn-secondary" onClick={() => setPage("doctor-queue")}>{t("platform.viewQueue")}</button>} />{renderQueueRows(waiting.slice(0, 5))}</Card></>;
+      content = <><SectionHeader eyebrow={t("platform.clinicalWorkspace")} title={`${t("platform.goodMorning")}, ${staff?.doctor?.name || authenticatedUser.name}`} actions={<button type="button" className="btn-primary" onClick={callNextPatient} disabled={platformLoading || !waiting.length}><PhoneCall size={17} />{t("platform.callNext")}</button>} /><p className="doctor-page-subtitle">{t("platform.doctorDashboardSubtitle")}</p><div className="doctor-stat-grid"><Card><span>{t("platform.waiting")}</span><strong>{staff?.queue?.waitingCount || 0}</strong></Card><Card><span>{t("platform.inConsultation")}</span><strong>{current?.status === "in_consultation" ? 1 : 0}</strong></Card><Card><span>{t("platform.completedToday")}</span><strong>{staff?.completedToday || 0}</strong></Card></div>{current && <Card className="current-consultation-card"><SectionHeader eyebrow={t("platform.currentConsultation")} title={`${current.displayToken} · ${current.patientName}`} actions={<button type="button" className="btn-secondary" onClick={() => openToken(current)}>{t("platform.openAssessment")}</button>} /><StatusBadge status="live">{t(`platform.tokenStatus.${current.status}`, { defaultValue: current.status })}</StatusBadge>{current.status === "called" ? <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "start")} disabled={platformLoading}>{t("platform.startConsultation")}</button> : <button type="button" className="btn-primary" onClick={() => updateStaffToken(current.id, "complete")} disabled={platformLoading}>{t("platform.completeConsultation")}</button>}</Card>}<Card className="doctor-dashboard-queue"><SectionHeader eyebrow={t("platform.nextInQueue")} title={t("platform.waitingPatients")} actions={<button type="button" className="btn-secondary" onClick={() => setPage("doctor-queue")}>{t("platform.viewQueue")}</button>} />{renderQueueRows(waiting.slice(0, 5))}</Card></>;
     }
-    return <div className="doctor-shell"><aside className="doctor-sidebar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav aria-label={t("platform.doctorNavigation")}>{navItems.map(([target, Icon, label]) => <button type="button" key={target} className={page === target ? "active" : ""} aria-current={page === target ? "page" : undefined} onClick={() => setPage(target)}><Icon size={18} /><span>{label}</span></button>)}</nav><button type="button" className="doctor-logout" onClick={logOut}><LogOut size={18} />{t("auth.logout")}</button></aside><main className="doctor-main"><header className="doctor-workspace-header"><div><p className="eyebrow">{t("platform.clinicalWorkspace")}</p><strong>{staff?.doctor?.name || authenticatedUser.name}</strong><span>{staff?.doctor?.specialization || staff?.doctor?.department || t("platform.doctorStaff")} Ã‚Â· {staff?.doctor?.hospitalName || t("platform.notReported")}</span></div><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || t("platform.notStarted")}</StatusBadge></header><Toast message={platformNotice} />{platformError && <p className="speech-error" role="alert">{platformError}</p>}{platformLoading && !staff ? <LoadingState label={t("platform.loadingWorkspace")} /> : <section className="doctor-content">{content}</section>}</main></div>;
+    return <div className="doctor-shell">{renderDoctorSidebar()}<main className="doctor-main"><header className="doctor-workspace-header"><div><p className="eyebrow">{t("platform.clinicalWorkspace")}</p><strong>{staff?.doctor?.name || authenticatedUser.name}</strong><span>{staff?.doctor?.specialization || staff?.doctor?.department || t("platform.doctorStaff")} · {staff?.doctor?.hospitalName || t("platform.notReported")}</span></div><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || t("platform.notStarted")}</StatusBadge></header><Toast message={platformNotice} />{platformError && <p className="speech-error" role="alert">{platformError}</p>}{platformLoading && !staff ? <LoadingState label={t("platform.loadingWorkspace")} /> : <section className="doctor-content">{content}</section>}</main></div>;
   }
 
   if (authenticatedUser?.role === "staff" && page.startsWith("doctor-")) {
     const staff = staffDashboard;
     const queueItems = staff?.waiting || [];
-    return <div className="role-workspace"><header className="role-topbar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav>{[["doctor-dashboard", t("auth.dashboard")], ["doctor-queue", t("platform.queue")], ["doctor-patients", t("platform.patients")], ["doctor-assessments", t("platform.assessments")]].map(([target, label]) => <button key={target} className={page === target ? "active" : ""} onClick={() => setPage(target)}>{label}</button>)}<button onClick={logOut}>{t("auth.logout")}</button></nav></header><main className="role-main"><Toast message={platformNotice} />{platformError && <p className="speech-error" role="alert">{platformError}</p>}{platformLoading && !staff ? <LoadingState label={t("platform.loadingWorkspace")} /> : page === "doctor-assessments" && selectedStaffToken ? <section className="clinical-workspace"><button className="btn-secondary" onClick={() => setPage("doctor-dashboard")}>{t("back")}</button><p className="eyebrow">{t("platform.patientAssessment")}</p><h1>{selectedStaffToken.patient?.name}</h1><div className="assessment-detail-grid"><Card><h2>{t("platform.assessment")}</h2><p><strong>{t("intakeFlow.bodySystem")}:</strong> {selectedStaffToken.assessment?.body_system}</p><p><strong>{t("intakeFlow.symptoms")}:</strong> {selectedStaffToken.symptoms?.map((item) => item.name).join(", ") || t("platform.notReported")}</p><p><strong>{t("intakeFlow.reviewSeverity")}:</strong> {selectedStaffToken.assessment?.severity}/10</p><p><strong>{t("intakeFlow.duration")}:</strong> {selectedStaffToken.assessment?.duration}</p><p><strong>{t("intakeFlow.progression")}:</strong> {selectedStaffToken.assessment?.progression}</p></Card><Card><h2>{t("platform.clinicalHistory")}</h2><p><strong>{t("platform.conditions")}:</strong> {selectedStaffToken.clinicalHistory?.existing_conditions || t("platform.notReported")}</p><p><strong>{t("platform.medications")}:</strong> {selectedStaffToken.clinicalHistory?.medications || t("platform.notReported")}</p><p><strong>{t("platform.allergies")}:</strong> {selectedStaffToken.clinicalHistory?.allergies || t("platform.notReported")}</p><p><strong>{t("platform.previousEpisodes")}:</strong> {selectedStaffToken.clinicalHistory?.previous_similar_symptoms || t("platform.notReported")}</p></Card><Card className="summary-card"><h2>{t("platform.aiClinicalSummary")}</h2><p>{selectedStaffToken.clinicalSummary?.english_summary?.chiefComplaint || selectedStaffToken.clinicalSummary?.english_summary?.historyOfPresentingComplaint || t("platform.noSummary")}</p><p className="muted">{t("platform.physicianReviewOnly")}</p></Card></div></section> : <><header className="workspace-heading"><div><p className="eyebrow">{t("platform.clinicalQueue")}</p><h1>{t("platform.goodMorning")}, {staff?.doctor?.name || authenticatedUser.name}</h1><p>{staff?.doctor?.department} Ã‚Â· {staff?.doctor?.hospitalName}</p></div><button className="btn-primary" onClick={callNextPatient} disabled={platformLoading || !queueItems.length}><PhoneCall size={17} />{t("platform.callNext")}</button></header><div className="metric-grid"><Card><span>{t("platform.nowServing")}</span><strong>{staff?.queue?.displayCurrentToken || t("platform.notStarted")}</strong></Card><Card><span>{t("platform.waiting")}</span><strong>{staff?.queue?.waitingCount || 0}</strong></Card><Card><span>{t("platform.completedToday")}</span><strong>{staff?.completedToday || 0}</strong></Card><Card><span>{t("platform.queueStatus")}</span><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || "Ã¢â‚¬â€"}</StatusBadge></Card></div><Card className="queue-work-card"><div className="section-heading"><div><p className="eyebrow">{t("platform.liveList")}</p><h2>{t("platform.waitingPatients")}</h2></div><button className="btn-secondary" onClick={loadStaffDashboard}>{t("platform.refresh")}</button></div>{queueItems.length ? <div className="staff-token-list">{queueItems.map((token) => <div key={token.id} className="staff-token-row"><strong>{token.displayToken}</strong><span>{token.patientName}</span><StatusBadge status="neutral">{token.status}</StatusBadge><button className="btn-secondary" onClick={() => openStaffAssessment(token.id)}>{t("platform.viewAssessment")}</button></div>)}</div> : <EmptyState title={t("platform.noWaitingPatients")} detail={t("platform.noWaitingPatientsDetail")} />}{staff?.current && <div className="current-consultation"><strong>{t("platform.currentPatient")}: {staff.current.displayToken}</strong><button className="btn-secondary" onClick={() => updateStaffToken(staff.current.id, "start")}>{t("platform.startConsultation")}</button><button className="btn-primary" onClick={() => updateStaffToken(staff.current.id, "complete")}>{t("platform.completeConsultation")}</button></div>}</Card></>}</main></div>;
+    return <div className="role-workspace"><header className="role-topbar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav>{[["doctor-dashboard", t("auth.dashboard")], ["doctor-queue", t("platform.queue")], ["doctor-patients", t("platform.patients")], ["doctor-assessments", t("platform.assessments")]].map(([target, label]) => <button key={target} className={page === target ? "active" : ""} onClick={() => setPage(target)}>{label}</button>)}<button onClick={logOut}>{t("auth.logout")}</button></nav></header><main className="role-main"><Toast message={platformNotice} />{platformError && <p className="speech-error" role="alert">{platformError}</p>}{platformLoading && !staff ? <LoadingState label={t("platform.loadingWorkspace")} /> : page === "doctor-assessments" && selectedStaffToken ? <section className="clinical-workspace"><button className="btn-secondary" onClick={() => setPage("doctor-dashboard")}>{t("back")}</button><p className="eyebrow">{t("platform.patientAssessment")}</p><h1>{selectedStaffToken.patient?.name}</h1><div className="assessment-detail-grid"><Card><h2>{t("platform.assessment")}</h2><p><strong>{t("intakeFlow.bodySystem")}:</strong> {selectedStaffToken.assessment?.body_system}</p><p><strong>{t("intakeFlow.symptoms")}:</strong> {selectedStaffToken.symptoms?.map((item) => item.name).join(", ") || t("platform.notReported")}</p><p><strong>{t("intakeFlow.reviewSeverity")}:</strong> {selectedStaffToken.assessment?.severity}/10</p><p><strong>{t("intakeFlow.duration")}:</strong> {selectedStaffToken.assessment?.duration}</p><p><strong>{t("intakeFlow.progression")}:</strong> {selectedStaffToken.assessment?.progression}</p></Card><Card><h2>{t("platform.clinicalHistory")}</h2><p><strong>{t("platform.conditions")}:</strong> {selectedStaffToken.clinicalHistory?.existing_conditions || t("platform.notReported")}</p><p><strong>{t("platform.medications")}:</strong> {selectedStaffToken.clinicalHistory?.medications || t("platform.notReported")}</p><p><strong>{t("platform.allergies")}:</strong> {selectedStaffToken.clinicalHistory?.allergies || t("platform.notReported")}</p><p><strong>{t("platform.previousEpisodes")}:</strong> {selectedStaffToken.clinicalHistory?.previous_similar_symptoms || t("platform.notReported")}</p></Card><Card className="summary-card"><h2>{t("platform.aiClinicalSummary")}</h2><p>{selectedStaffToken.clinicalSummary?.english_summary?.chiefComplaint || selectedStaffToken.clinicalSummary?.english_summary?.historyOfPresentingComplaint || t("platform.noSummary")}</p><p className="muted">{t("platform.physicianReviewOnly")}</p></Card></div></section> : <><header className="workspace-heading"><div><p className="eyebrow">{t("platform.clinicalQueue")}</p><h1>{t("platform.goodMorning")}, {staff?.doctor?.name || authenticatedUser.name}</h1><p>{staff?.doctor?.department} · {staff?.doctor?.hospitalName}</p></div><button className="btn-primary" onClick={callNextPatient} disabled={platformLoading || !queueItems.length}><PhoneCall size={17} />{t("platform.callNext")}</button></header><div className="metric-grid"><Card><span>{t("platform.nowServing")}</span><strong>{staff?.queue?.displayCurrentToken || t("platform.notStarted")}</strong></Card><Card><span>{t("platform.waiting")}</span><strong>{staff?.queue?.waitingCount || 0}</strong></Card><Card><span>{t("platform.completedToday")}</span><strong>{staff?.completedToday || 0}</strong></Card><Card><span>{t("platform.queueStatus")}</span><StatusBadge status={staff?.queue?.queueStatus === "active" ? "success" : "neutral"}>{staff?.queue?.queueStatus || "—"}</StatusBadge></Card></div><Card className="queue-work-card"><div className="section-heading"><div><p className="eyebrow">{t("platform.liveList")}</p><h2>{t("platform.waitingPatients")}</h2></div><button className="btn-secondary" onClick={loadStaffDashboard}>{t("platform.refresh")}</button></div>{queueItems.length ? <div className="staff-token-list">{queueItems.map((token) => <div key={token.id} className="staff-token-row"><strong>{token.displayToken}</strong><span>{token.patientName}</span><StatusBadge status="neutral">{token.status}</StatusBadge><button className="btn-secondary" onClick={() => openStaffAssessment(token.id)}>{t("platform.viewAssessment")}</button></div>)}</div> : <EmptyState title={t("platform.noWaitingPatients")} detail={t("platform.noWaitingPatientsDetail")} />}{staff?.current && <div className="current-consultation"><strong>{t("platform.currentPatient")}: {staff.current.displayToken}</strong><button className="btn-secondary" onClick={() => updateStaffToken(staff.current.id, "start")}>{t("platform.startConsultation")}</button><button className="btn-primary" onClick={() => updateStaffToken(staff.current.id, "complete")}>{t("platform.completeConsultation")}</button></div>}</Card></>}</main></div>;
   }
 
   if (authenticatedUser?.role === "admin" && page.startsWith("admin-")) {
@@ -1484,13 +1747,13 @@ function App() {
       content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.hospitalManagement")} actions={searchBox} /><div className="admin-card-grid">{hospitals.length ? hospitals.map((hospital) => <Card key={hospital.id} className="admin-entity-card"><Hospital size={20} /><h3>{hospital.name}</h3><p>{hospital.address || t("platform.notReported")}</p><StatusBadge status="success">{t("platform.connected")}</StatusBadge><p className="muted">{hospital.doctors?.filter((doctor) => doctor.is_active).length || 0} {t("platform.activeDoctors")}</p></Card>) : <EmptyState title={t("platform.noResults")} detail={t("platform.adjustSearch")} />}</div></>;
     } else if (section === "doctors") {
       const doctors = adminData.doctors.filter((doctor) => matches(doctor.name, doctor.department, doctor.specialization, doctor.hospitals?.name));
-      content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.doctorManagement")} actions={searchBox} /><div className="admin-list">{doctors.length ? doctors.map((doctor) => { const queue = Array.isArray(doctor.doctor_queues) ? doctor.doctor_queues[0] : doctor.doctor_queues; return <Card key={doctor.id} className="admin-list-row"><div><strong>{doctor.name}</strong><span>{doctor.specialization || doctor.department || t("platform.notReported")} Ã‚Â· {doctor.hospitals?.name || t("platform.notReported")}</span></div><StatusBadge status={doctor.is_active ? "success" : "neutral"}>{doctor.is_active ? t("platform.active") : t("platform.inactive")}</StatusBadge><StatusBadge status={queue?.queue_status === "active" ? "live" : "neutral"}>{queue?.queue_status || t("platform.notStarted")}</StatusBadge><button type="button" className="btn-secondary" onClick={() => toggleDoctor(doctor)} disabled={platformLoading}>{doctor.is_active ? t("platform.deactivate") : t("platform.activate")}</button></Card>; }) : <EmptyState title={t("platform.noResults")} detail={t("platform.adjustSearch")} />}</div></>;
+      content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.doctorManagement")} actions={searchBox} /><div className="admin-list">{doctors.length ? doctors.map((doctor) => { const queue = Array.isArray(doctor.doctor_queues) ? doctor.doctor_queues[0] : doctor.doctor_queues; return <Card key={doctor.id} className="admin-list-row"><div><strong>{doctor.name}</strong><span>{doctor.specialization || doctor.department || t("platform.notReported")} · {doctor.hospitals?.name || t("platform.notReported")}</span></div><StatusBadge status={doctor.is_active ? "success" : "neutral"}>{doctor.is_active ? t("platform.active") : t("platform.inactive")}</StatusBadge><StatusBadge status={queue?.queue_status === "active" ? "live" : "neutral"}>{queue?.queue_status || t("platform.notStarted")}</StatusBadge><button type="button" className="btn-secondary" onClick={() => toggleDoctor(doctor)} disabled={platformLoading}>{doctor.is_active ? t("platform.deactivate") : t("platform.activate")}</button></Card>; }) : <EmptyState title={t("platform.noResults")} detail={t("platform.adjustSearch")} />}</div></>;
     } else if (section === "queues") {
       const queues = adminData.queues.filter((queue) => matches(queue.doctorName, queue.department, queue.hospitalName));
       content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.queueManagement")} actions={searchBox} /><div className="admin-card-grid">{queues.length ? queues.map((queue) => <Card key={queue.doctorId} className="admin-queue-card"><p>{queue.hospitalName || t("platform.notReported")}</p><h3>{queue.doctorName}</h3><span>{queue.department}</span><div><strong>{queue.currentToken || t("platform.notStarted")}</strong><small>{t("platform.currentToken")}</small></div><StatusBadge status={queue.queueStatus === "active" ? "success" : "neutral"}>{queue.queueStatus}</StatusBadge><p className="muted">{queue.waitingCount} {t("platform.waiting")}</p></Card>) : <EmptyState title={t("platform.noResults")} detail={t("platform.adjustSearch")} />}</div></>;
     } else if (section === "patients") {
       const patients = adminData.patients.filter((patient) => matches(patient.name, patient.id));
-      content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.patientOperations")} actions={searchBox} /><div className="admin-list">{patients.length ? patients.map((patient) => <Card key={patient.id} className="admin-list-row"><div><strong>{patient.name}</strong><span>{t("platform.assessments")}: {patient.assessmentCount} Ã‚Â· {t("platform.lastActivity")}: {patient.lastActivity ? new Date(patient.lastActivity).toLocaleDateString() : t("platform.notReported")}</span></div><StatusBadge status={patient.activeToken ? "live" : "neutral"}>{patient.activeToken ? t("platform.activeToken") : t("platform.noActiveToken")}</StatusBadge></Card>) : <EmptyState title={t("platform.noResults")} detail={t("platform.adjustSearch")} />}</div></>;
+      content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.patientOperations")} actions={searchBox} /><div className="admin-list">{patients.length ? patients.map((patient) => <Card key={patient.id} className="admin-list-row"><div><strong>{patient.name}</strong><span>{t("platform.assessments")}: {patient.assessmentCount} · {t("platform.lastActivity")}: {patient.lastActivity ? new Date(patient.lastActivity).toLocaleDateString() : t("platform.notReported")}</span></div><StatusBadge status={patient.activeToken ? "live" : "neutral"}>{patient.activeToken ? t("platform.activeToken") : t("platform.noActiveToken")}</StatusBadge></Card>) : <EmptyState title={t("platform.noResults")} detail={t("platform.adjustSearch")} />}</div></>;
     } else if (section === "assessments") {
       content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.assessments")} /><EmptyState title={t("platform.assessmentDataUnavailable")} detail={t("platform.assessmentDataUnavailableDetail")} /></>;
     } else if (section === "reports") {
@@ -1499,7 +1762,7 @@ function App() {
       content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.adminProfile")} /><div className="admin-profile-grid"><Card><p><strong>{t("platform.accountName")}:</strong> {authenticatedUser.name}</p><p><strong>{t("platform.role")}:</strong> {t("platform.administrator")}</p><p><strong>{t("platform.sessionStatus")}:</strong> {t("platform.active")}</p></Card><Card><p className="muted">{t("platform.profileSecurityNote")}</p></Card></div></>;
     } else {
       const overviewCards = [["hospitals", Hospital, t("platform.hospitals")], ["activeDoctors", Stethoscope, t("platform.activeDoctors")], ["activeQueues", Ticket, t("platform.activeQueues")], ["patients", Users, t("platform.totalPatients")], ["tokensToday", Activity, t("platform.tokensToday")], ["completedConsultations", CheckCircle2, t("platform.completedConsultations")]];
-      content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.adminDashboard")} actions={<button type="button" className="btn-secondary" onClick={prepareDemoQueues} disabled={platformLoading}><BarChart3 size={17} />{t("platform.prepareDemoQueues")}</button>} /><p className="admin-page-subtitle">{t("platform.adminDashboardSubtitle")}</p><div className="admin-stat-grid">{overviewCards.map(([key, Icon, label]) => <Card key={key}><Icon size={20} /><span>{label}</span><strong>{adminData.overview?.[key] || 0}</strong></Card>)}</div><div className="admin-overview-grid"><Card><SectionHeader title={t("platform.hospitalStatus")} /><div className="admin-compact-list">{adminData.hospitals.slice(0, 4).map((hospital) => <div key={hospital.id}><strong>{hospital.name}</strong><span>{hospital.doctors?.filter((doctor) => doctor.is_active).length || 0} {t("platform.activeDoctors")}</span></div>)}</div></Card><Card><SectionHeader title={t("platform.queueActivity")} /><div className="admin-compact-list">{adminData.queues.slice(0, 4).map((queue) => <div key={queue.doctorId}><strong>{queue.doctorName}</strong><span>{queue.currentToken || t("platform.notStarted")} Ã‚Â· {queue.waitingCount} {t("platform.waiting")}</span></div>)}</div></Card></div></>;
+      content = <><SectionHeader eyebrow={t("platform.operations")} title={t("platform.adminDashboard")} actions={<button type="button" className="btn-secondary" onClick={prepareDemoQueues} disabled={platformLoading}><BarChart3 size={17} />{t("platform.prepareDemoQueues")}</button>} /><p className="admin-page-subtitle">{t("platform.adminDashboardSubtitle")}</p><div className="admin-stat-grid">{overviewCards.map(([key, Icon, label]) => <Card key={key}><Icon size={20} /><span>{label}</span><strong>{adminData.overview?.[key] || 0}</strong></Card>)}</div><div className="admin-overview-grid"><Card><SectionHeader title={t("platform.hospitalStatus")} /><div className="admin-compact-list">{adminData.hospitals.slice(0, 4).map((hospital) => <div key={hospital.id}><strong>{hospital.name}</strong><span>{hospital.doctors?.filter((doctor) => doctor.is_active).length || 0} {t("platform.activeDoctors")}</span></div>)}</div></Card><Card><SectionHeader title={t("platform.queueActivity")} /><div className="admin-compact-list">{adminData.queues.slice(0, 4).map((queue) => <div key={queue.doctorId}><strong>{queue.doctorName}</strong><span>{queue.currentToken || t("platform.notStarted")} · {queue.waitingCount} {t("platform.waiting")}</span></div>)}</div></Card></div></>;
     }
     return <div className="admin-shell"><aside className="admin-sidebar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><div className="admin-sidebar-profile"><Shield size={18} /><span>{authenticatedUser.name}</span><small>{t("platform.administrator")}</small></div><nav aria-label={t("platform.adminNavigation")}>{navItems.map(([target, Icon, label]) => <button type="button" key={target} className={page === target ? "active" : ""} aria-current={page === target ? "page" : undefined} onClick={() => setPage(target)}><Icon size={18} /><span>{label}</span></button>)}</nav><button type="button" className="admin-logout" onClick={logOut}><LogOut size={18} />{t("auth.logout")}</button></aside><main className="admin-main"><header className="admin-workspace-header"><div><p className="eyebrow">{t("platform.systemOverview")}</p><strong>{t("platform.administration")}</strong><span>{t("platform.adminHeaderSubtitle")}</span></div><StatusBadge status="success">{t("platform.active")}</StatusBadge></header><Toast message={platformNotice} />{platformError && <p className="speech-error" role="alert">{platformError}</p>}{platformLoading && !adminData.overview ? <LoadingState label={t("platform.loadingWorkspace")} /> : <section className="admin-content">{content}</section>}</main></div>;
   }
@@ -1521,8 +1784,7 @@ function App() {
   if (page === "dashboard") {
     const selectedSystem = BODY_SYSTEMS.find((system) => system.id === intakeData.bodySystem);
     const hasRecentAssessment = Boolean(intakeData.bodySystem || intakeData.symptoms.length || clinicalSummary);
-    const patientNav = [["dashboard", LayoutDashboard, t("auth.dashboard")], ["documents", FileText, t("auth.medicalDocuments")], ["records", ClipboardList, t("medicalRecords")], ["profile", UserRound, t("auth.profile")]];
-    return <div className="patient-shell"><aside className="patient-sidebar"><div className="logo"><div className="logo-icon"><HeartPulse size={20} /></div><span>Med<span>Flow</span></span></div><nav aria-label={t("platform.patientNavigation")}>{patientNav.map(([target, Icon, label]) => <button type="button" key={target} className={page === target ? "active" : ""} aria-current={page === target ? "page" : undefined} onClick={() => setPage(target)}><Icon size={18} /><span>{label}</span></button>)}</nav><div className="patient-sidebar-accessibility">{renderAccessibilityControls()}</div><button type="button" className="patient-logout" onClick={logOut}><LogOut size={18} />{t("auth.logout")}</button></aside><main className="patient-main"><header className="patient-workspace-header"><div><p className="eyebrow">{t("platform.patientPortal")}</p><h1>{authenticatedUser?.name ? `${t("platform.goodMorning")}, ${authenticatedUser.name}` : t("platform.welcome")}</h1><p>{t("platform.patientDashboardSubtitle")}</p></div><LanguageSwitcher setForm={setForm} /></header>{queueError && <p className="speech-error" role="alert">{queueError}</p>}{activeToken ? <Card className="patient-queue-card" aria-live="polite"><SectionHeader eyebrow={t("platform.activeQueue")} title={activeToken.displayToken || activeToken.tokenNumber} actions={<StatusBadge status={activeToken.status === "called" || activeToken.status === "in_consultation" ? "live" : "neutral"}>{t(`platform.tokenStatus.${activeToken.status}`, { defaultValue: activeToken.status })}</StatusBadge>} /><div className="patient-queue-details"><div><span>{t("platform.doctor")}</span><strong>{activeToken.doctorName || t("platform.notReported")}</strong></div><div><span>{t("platform.hospital")}</span><strong>{activeToken.hospitalName || t("platform.notReported")}</strong></div><div><span>{t("queue.patientsAhead")}</span><strong>{activeToken.patientsAhead ?? t("platform.notReported")}</strong></div></div><button type="button" className="btn-secondary" onClick={() => setPage("live-queue")}>{t("queue.viewLiveQueue")}</button></Card> : <Card className="patient-no-queue"><SectionHeader eyebrow={t("platform.activeQueue")} title={t("platform.noActiveQueue")} /><p>{t("platform.noActiveQueueDetail")}</p></Card>}<Card className="patient-assessment-cta"><div><HeartPulse size={28} /><div><h2>{t("platform.startNewAssessment")}</h2><p>{t("platform.startAssessmentFriendlyDescription")}</p></div><button type="button" className="btn-primary" onClick={() => { setIntakeStep(1); setPage("consent"); }}><Activity size={17} />{t("platform.startAssessment")}</button></div></Card><Card className="patient-recent-card"><SectionHeader eyebrow={t("platform.recentAssessment")} title={hasRecentAssessment ? (selectedSystem ? t(selectedSystem.titleKey) : intakeData.bodySystem || t("platform.assessment")) : t("platform.noRecentAssessment")} actions={hasRecentAssessment ? <button type="button" className="btn-secondary" onClick={() => setPage("records")}>{t("platform.viewRecords")}</button> : null} />{hasRecentAssessment ? <div className="patient-recent-details"><span>{t("platform.severity")}: <strong>{intakeData.severity ?? t("platform.notReported")}</strong></span><span>{t("platform.status")}: <StatusBadge status="neutral">{clinicalSummary ? t("platform.summaryReady") : t("platform.inProgress")}</StatusBadge></span><span>{t("platform.symptoms")}: <strong>{intakeData.symptoms.length || t("platform.notReported")}</strong></span></div> : <p>{t("platform.noRecentAssessmentDetail")}</p>}</Card><section className="patient-quick-actions"><button type="button" onClick={() => setPage("documents")}><FileText size={20} /><span>{t("auth.medicalDocuments")}</span></button><button type="button" onClick={() => setPage("records")}><ClipboardList size={20} /><span>{t("medicalRecords")}</span></button><button type="button" onClick={() => setPage("profile")}><UserRound size={20} /><span>{t("auth.profile")}</span></button></section></main></div>;
+    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main"><header className="patient-workspace-header"><div><p className="eyebrow">{t("platform.patientPortal")}</p><h1>{authenticatedUser?.name ? t("platform.goodMorning", { name: `\u2068${authenticatedUser.name}\u2069` }) : t("platform.welcome")}</h1><p>{t("platform.patientDashboardSubtitle")}</p></div>{renderPatientHeaderActions()}</header><Toast message={platformNotice} />{queueError && <p className="speech-error" role="alert">{queueError}</p>}{activeToken ? <Card className="patient-queue-card" aria-live="polite"><SectionHeader eyebrow={t("platform.activeQueue")} title={<bdi dir="ltr">{activeToken.displayToken || activeToken.tokenNumber}</bdi>} actions={<StatusBadge status={activeToken.status === "called" || activeToken.status === "in_consultation" ? "live" : "neutral"}>{t(`platform.tokenStatus.${activeToken.status}`, { defaultValue: activeToken.status })}</StatusBadge>} /><div className="patient-queue-details"><div><span>{t("platform.doctor")}</span><strong><bdi dir="ltr">{activeToken.doctorName || t("platform.notReported")}</bdi></strong></div><div><span>{t("platform.hospital")}</span><strong><bdi dir="ltr">{activeToken.hospitalName || t("platform.notReported")}</bdi></strong></div><div><span>{t("queue.patientsAhead")}</span><strong><bdi dir="ltr">{activeToken.patientsAhead ?? t("platform.notReported")}</bdi></strong></div></div><button type="button" className="btn-secondary" onClick={() => setPage("live-queue")}>{t("queue.viewLiveQueue")}</button></Card> : <Card className="patient-no-queue"><SectionHeader eyebrow={t("platform.activeQueue")} title={t("platform.noActiveQueue")} /><p>{t("platform.noActiveQueueDetail")}</p></Card>}<Card className="patient-assessment-cta"><div><HeartPulse size={28} /><div><h2>{t("platform.startNewAssessment")}</h2><p>{t("platform.startAssessmentFriendlyDescription")}</p></div><button type="button" className="btn-primary" onClick={() => { setIntakeStep(1); setPage("consent"); }}><Activity size={17} />{t("platform.startAssessment")}</button></div></Card><Card className="patient-recent-card"><SectionHeader eyebrow={t("platform.recentAssessment")} title={hasRecentAssessment ? (selectedSystem ? t(selectedSystem.titleKey) : intakeData.bodySystem || t("platform.assessment")) : t("platform.noRecentAssessment")} actions={hasRecentAssessment ? <button type="button" className="btn-secondary" onClick={() => setPage("records")}>{t("platform.viewRecords")}</button> : null} />{hasRecentAssessment ? <div className="patient-recent-details"><span>{t("platform.severity")}: <strong><bdi dir="ltr">{intakeData.severity ?? t("platform.notReported")}</bdi></strong></span><span>{t("platform.status")}: <StatusBadge status="neutral">{clinicalSummary ? t("platform.summaryReady") : t("platform.inProgress")}</StatusBadge></span><span>{t("platform.symptoms")}: <strong><bdi dir="ltr">{intakeData.symptoms.length || t("platform.notReported")}</bdi></strong></span></div> : <p>{t("platform.noRecentAssessmentDetail")}</p>}</Card><section className="patient-quick-actions"><button type="button" onClick={() => setPage("documents")}><FileText size={20} /><span>{t("auth.medicalDocuments")}</span></button><button type="button" onClick={() => setPage("records")}><ClipboardList size={20} /><span>{t("medicalRecords")}</span></button></section></main></div>;
   }
 
   if (page === "dashboard") {
@@ -1540,8 +1802,8 @@ function App() {
           <section><h2>{t("auth.healthOverview")}</h2><div className="overview-grid"><div><span>{t("auth.currentSymptoms")}</span><strong>{intakeData.symptoms.length} {t("auth.recorded")}</strong></div><div><span>{t("auth.documentsUploaded")}</span><strong>{dashboardDocuments.length} {t("auth.recorded")}</strong></div><div><span>{t("auth.historyAvailable")}</span><strong>{hasIntake ? t("auth.available") : t("auth.noHealthInformation")}</strong></div><div><span>{t("auth.latestSummary")}</span><strong>{clinicalSummary ? t("auth.updatedToday") : t("auth.notProvided")}</strong></div></div></section>
           {activeToken && <section className="dashboard-section dashboard-live-queue" aria-live="polite"><span className="live-badge" aria-label={t("queue.liveAria")}><Radio size={13} /> {t("queue.live")}</span><h2>{activeToken.doctorName}</h2><p>{activeToken.department}</p><div><strong>{t("queue.yourToken")}: {activeToken.tokenNumber}</strong><strong>{t("queue.nowServing")}: {activeToken.currentToken}</strong><span>{activeToken.patientsAhead} {t("queue.patientsAhead")}</span></div><button type="button" className="read-aloud-button" onClick={() => speak(`${activeToken.doctorName}. ${t("queue.nowServing")} ${activeToken.currentToken}. ${t("queue.yourToken")} ${activeToken.tokenNumber}. ${activeToken.patientsAhead} ${t("queue.patientsAhead")}`)}><Volume2 size={17} />{t("queue.readQueue")}</button><button type="button" className="btn-secondary" onClick={() => setPage("live-queue")}>{t("queue.viewLiveQueue")}</button></section>}
           <section className="dashboard-section recent-assessment"><h2>{t("auth.recentAssessment")}</h2>{hasIntake ? <div className="recent-assessment-grid"><div><span>{t("intakeFlow.bodySystem")}</span><strong>{selectedSystem ? t(selectedSystem.titleKey) : intakeData.bodySystem}</strong></div><div><span>{t("auth.mainSymptoms")}</span><strong>{intakeData.symptoms.map(getSymptomLabel).join(", ") || t("intakeFlow.notReported")}</strong></div><div><span>{t("intakeFlow.reviewSeverity")}</span><strong>{intakeData.severity}/10</strong></div><div><span>{t("auth.assessmentDate")}</span><strong>{new Date().toLocaleDateString()}</strong></div><div><span>{t("auth.status")}</span><strong className="assessment-status">{t("auth.completed")}</strong></div></div> : <p>{t("auth.noRecentAssessment")}</p>}</section>
-          <section className="dashboard-section ai-dashboard"><h2>{t("auth.aiSummary")}</h2><span className="source-badge ai">{t("auth.aiGenerated")}</span><p>{t("auth.aiDisclaimer")}</p>{clinicalSummary ? <div className="clinical-summary-grid"><div><span>{t("intakeFlow.chiefConcern")}</span><strong>{clinicalSummary.chief_concern}</strong></div><div><span>{t("intakeFlow.historyOfPresentIllness")}</span><strong>{clinicalSummary.history_of_present_illness}</strong></div><div><span>{t("intakeFlow.reviewSymptoms")}</span><strong>{clinicalSummary.reported_symptoms?.join(", ") || intakeData.symptoms.map(getSymptomLabel).join(", ")}</strong></div><div><span>{t("intakeFlow.reviewSeverityProgression")}</span><strong>{clinicalSummary.severity} Ã‚Â· {clinicalSummary.duration} Ã‚Â· {clinicalSummary.symptom_progression}</strong></div><div><span>{t("intakeFlow.reviewMedConditions")}</span><strong>{clinicalSummary.relevant_medical_history}</strong></div><div><span>{t("intakeFlow.reviewMedications")}</span><strong>{clinicalSummary.current_medications}</strong></div><div><span>{t("intakeFlow.reviewAllergies")}</span><strong>{clinicalSummary.allergies}</strong></div><div><span>{t("intakeFlow.documentDerivedInformation")}</span><strong>{clinicalSummary.document_derived_information || t("auth.noDocuments")}</strong></div><div><span>{t("intakeFlow.additionalNotes")}</span><strong>{clinicalSummary.additional_information || t("intakeFlow.notReported")}</strong></div></div> : <p>{t("auth.noHealthInformation")}</p>}</section>
-          <section className="dashboard-section"><div className="section-heading"><h2>{t("auth.healthInformation")}</h2><button className="btn-secondary" onClick={() => { setIntakeStep(1); setPage("intake"); }}>{t("auth.editHealthInformation")}</button></div>{hasIntake ? <div className="dashboard-info-grid"><article style={{ borderColor: systemColor.border }}><h3>{t("intakeFlow.bodySystem")}</h3><strong>{selectedSystem ? t(selectedSystem.titleKey) : intakeData.bodySystem}</strong><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.symptoms")}</h3><div className="review-symptoms-list">{intakeData.symptoms.map((id) => <span key={id} className="review-symptom-tag">{getSymptomLabel(id)}</span>)}</div><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.severityDuration")}</h3><p>{intakeData.severity}/10 Ã‚Â· {getDurationLabel(intakeData.duration)} Ã‚Â· {getProgressionLabel(intakeData.progression)}</p><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.medicalHistory")}</h3><p>{intakeData.medicalConditionsText || t("intakeFlow.notReported")}</p><p>{intakeData.medicationsText || t("intakeFlow.notReported")}</p><p>{intakeData.allergiesText || t("intakeFlow.notReported")}</p><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.additionalRemarks")}</h3><p>{intakeData.additionalInformation || t("intakeFlow.notReported")}</p><span className="source-badge patient">{t("auth.patientReported")}</span></article></div> : <p>{t("auth.noHealthInformation")}</p>}</section>
+          <section className="dashboard-section ai-dashboard"><h2>{t("auth.aiSummary")}</h2><span className="source-badge ai">{t("auth.aiGenerated")}</span><p>{t("auth.aiDisclaimer")}</p>{clinicalSummary ? <div className="clinical-summary-grid"><div><span>{t("intakeFlow.chiefConcern")}</span><strong>{clinicalSummary.chief_concern}</strong></div><div><span>{t("intakeFlow.historyOfPresentIllness")}</span><strong>{clinicalSummary.history_of_present_illness}</strong></div><div><span>{t("intakeFlow.reviewSymptoms")}</span><strong>{clinicalSummary.reported_symptoms?.join(", ") || intakeData.symptoms.map(getSymptomLabel).join(", ")}</strong></div><div><span>{t("intakeFlow.reviewSeverityProgression")}</span><strong>{clinicalSummary.severity} · {clinicalSummary.duration} · {clinicalSummary.symptom_progression}</strong></div><div><span>{t("intakeFlow.reviewMedConditions")}</span><strong>{clinicalSummary.relevant_medical_history}</strong></div><div><span>{t("intakeFlow.reviewMedications")}</span><strong>{clinicalSummary.current_medications}</strong></div><div><span>{t("intakeFlow.reviewAllergies")}</span><strong>{clinicalSummary.allergies}</strong></div><div><span>{t("intakeFlow.documentDerivedInformation")}</span><strong>{clinicalSummary.document_derived_information || t("auth.noDocuments")}</strong></div><div><span>{t("intakeFlow.additionalNotes")}</span><strong>{clinicalSummary.additional_information || t("intakeFlow.notReported")}</strong></div></div> : <p>{t("auth.noHealthInformation")}</p>}</section>
+          <section className="dashboard-section"><div className="section-heading"><h2>{t("auth.healthInformation")}</h2><button className="btn-secondary" onClick={() => { setIntakeStep(1); setPage("intake"); }}>{t("auth.editHealthInformation")}</button></div>{hasIntake ? <div className="dashboard-info-grid"><article style={{ borderColor: systemColor.border }}><h3>{t("intakeFlow.bodySystem")}</h3><strong>{selectedSystem ? t(selectedSystem.titleKey) : intakeData.bodySystem}</strong><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.symptoms")}</h3><div className="review-symptoms-list">{intakeData.symptoms.map((id) => <span key={id} className="review-symptom-tag">{getSymptomLabel(id)}</span>)}</div><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.severityDuration")}</h3><p>{intakeData.severity}/10 · {getDurationLabel(intakeData.duration)} · {getProgressionLabel(intakeData.progression)}</p><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.medicalHistory")}</h3><p>{intakeData.medicalConditionsText || t("intakeFlow.notReported")}</p><p>{intakeData.medicationsText || t("intakeFlow.notReported")}</p><p>{intakeData.allergiesText || t("intakeFlow.notReported")}</p><span className="source-badge patient">{t("auth.patientReported")}</span></article><article><h3>{t("auth.additionalRemarks")}</h3><p>{intakeData.additionalInformation || t("intakeFlow.notReported")}</p><span className="source-badge patient">{t("auth.patientReported")}</span></article></div> : <p>{t("auth.noHealthInformation")}</p>}</section>
           <section className="dashboard-section" id="dashboard-documents"><h2>{t("auth.medicalDocuments")}</h2>{dashboardDocuments.length ? <div className="dashboard-documents">{dashboardDocuments.map((doc) => <article key={doc.id}><FileText size={20} /><div><strong>{doc.name}</strong><span>{doc.type}</span></div><span className="source-badge document">{doc.status === "processed" || doc.status === "Verified" ? t("auth.processed") : doc.status === "failed" ? t("auth.failed") : t("auth.processing")}</span></article>)}</div> : <p>{t("auth.noDocuments")}</p>}</section>
           <section className="dashboard-section"><h2>{t("auth.informationFromDocuments")}</h2><span className="source-badge document">{t("auth.fromDocument")}</span><p>{clinicalSummary?.document_derived_information || (dashboardDocuments.length ? t("auth.documentsUploaded") : t("auth.noDocuments"))}</p></section>
           <section className="dashboard-section"><h2>{t("auth.recentActivity")}</h2><p>{t("auth.assessmentSaved")}</p></section>
@@ -1550,9 +1812,57 @@ function App() {
     );
   }
 
+  if (page === "find-doctor") {
+    const selectedHospital = hospitals.find((hospital) => hospital.id === selectedHospitalId);
+    const departments = [...new Set(queueDoctors.map((doctor) => doctor.department).filter(Boolean))];
+    const visibleDoctors = selectedDepartment ? queueDoctors.filter((doctor) => doctor.department === selectedDepartment) : [];
+    const suggestedDepartments = {
+      heart: "Cardiology", lungs: "Pulmonology", brain: "Neurology", digestive: "Gastroenterology",
+      muscles: "Orthopedics", skin: "Dermatology", urinary: "Urology", general: "General Medicine",
+    };
+    const suggestedDepartment = clinicalSummary?.recommended_specialist?.specialty || suggestedDepartments[intakeData.bodySystem];
+
+    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main patient-section-main"><div className="care-discovery-container">
+      <header className="records-header"><div><p className="eyebrow">{t("patientFind.eyebrow")}</p><h1>{t("patientFind.title")}</h1><p>{t("patientFind.description")}</p></div><div className="patient-header-actions"><button type="button" className="btn-secondary" onClick={() => setPage("dashboard")}>{t("patientFind.skip")}</button>{renderPatientHeaderActions()}</div></header>
+      <Card className="recommendation-context"><SectionHeader eyebrow={t("patientFind.recommendedSpecialist")} title={suggestedDepartment || t("patientFind.chooseDepartment")} /><p>{clinicalSummary?.recommended_specialist?.reason || (suggestedDepartment ? t("patientFind.reason", { department: suggestedDepartment }) : t("patientFind.selectCare"))}</p></Card>
+      {queueError && <p className="speech-error" role="alert">{queueError}</p>}
+      <section className="care-discovery-steps" aria-label="Doctor discovery">
+        <Card><span className="care-step">1</span><label className="queue-select-label">Choose Hospital<select value={selectedHospitalId} onChange={(event) => setSelectedHospitalId(event.target.value)} aria-label="Choose hospital"><option value="">Select a hospital</option>{hospitals.map((hospital) => <option key={hospital.id} value={hospital.id}>{hospital.name} — {hospital.address}</option>)}</select></label>{selectedHospital && <p className="queue-address"><Hospital size={17} /> {selectedHospital.address}</p>}</Card>
+        <Card><span className="care-step">2</span><label className="queue-select-label">Choose Department<select value={selectedDepartment} onChange={(event) => setSelectedDepartment(event.target.value)} disabled={!selectedHospitalId || loadingQueueDoctors || !departments.length} aria-label="Choose department"><option value="">{loadingQueueDoctors ? "Loading departments…" : "Select a department"}</option>{departments.map((department) => <option key={department} value={department}>{department}</option>)}</select></label>{selectedHospitalId && !loadingQueueDoctors && !departments.length && <p className="muted">No active departments are currently available at this hospital.</p>}</Card>
+      </section>
+      <section aria-live="polite" aria-busy={loadingQueueDoctors}><SectionHeader eyebrow="Step 3" title="Choose Doctor" />{loadingQueueDoctors ? <LoadingState label="Loading available doctors…" /> : selectedDepartment && visibleDoctors.length ? <div className="doctor-queue-grid">{visibleDoctors.map((doctor) => <Card className="doctor-queue-card" key={doctor.id}><div className="doctor-card-title"><span className="doctor-avatar"><Stethoscope size={22} /></span><div><h2>{doctor.name}</h2><p>{doctor.department}</p><small>{doctor.specialization || "Specialization not provided"}</small></div></div><StatusBadge status={doctor.queue?.queueStatus === "active" ? "success" : "neutral"}>{doctor.queue?.queueStatus === "active" ? "Available" : "Queue unavailable"}</StatusBadge><div className="queue-stat-grid"><div><span>Now serving</span><strong>{doctor.queue?.displayCurrentToken || "Not started"}</strong></div><div><span>Queue</span><strong>{doctor.queue?.waitingCount ?? 0} patients</strong></div></div><button type="button" className="btn-primary" onClick={() => createToken(doctor.id)} disabled={doctor.queue?.queueStatus !== "active"}>Confirm Doctor & Get Token <Ticket size={16} /></button></Card>)}</div> : <EmptyState title={selectedDepartment ? "No active doctors are currently available in this department." : "Choose a department to view doctors."} detail={selectedDepartment ? "Try another department or hospital." : "Doctor availability is shown from the selected hospital's live data."} />}</section>
+      {activeToken && <Card className="patient-queue-card live-queue-summary" aria-live="polite"><SectionHeader eyebrow={t("platform.liveList")} title={activeToken.displayToken || activeToken.tokenNumber} actions={<StatusBadge status="live">{t("queue.live")}</StatusBadge>} /><div className="patient-queue-details"><div><span>{t("queue.nowServing")}</span><strong>{activeToken.displayCurrentToken || activeToken.currentToken || t("platform.notStarted")}</strong></div><div><span>{t("queue.patientsAhead")}</span><strong>{activeToken.patientsAhead ?? t("platform.notReported")}</strong></div><div><span>{t("queue.status")}</span><strong>{activeToken.status || t("platform.notReported")}</strong></div></div><p className="queue-updated">{t("platform.lastActivity")}: {lastQueueUpdated ? lastQueueUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : t("platform.notReported")}</p><button type="button" className="btn-secondary" onClick={() => setPage("live-queue")}>{t("platform.viewQueue")}</button></Card>}
+    </div></main></div>;
+  }
+
+  if (page === "faq" || page === "help") {
+    const faqItems = [
+      ["General", "What is MedFlow?", "MedFlow helps you organize information you choose to provide, complete a structured assessment, and find available care options."],
+      ["General", "How does MedFlow work?", "You complete an assessment, can upload supporting documents, review a structured summary, and optionally choose an available doctor."],
+      ["General", "Is MedFlow a doctor?", "No. MedFlow is a health-information and care-navigation tool; it does not replace a clinician."],
+      ["General", "Can MedFlow diagnose me?", "No. The assessment and summary are informational and must not be treated as a diagnosis."],
+      ["Assessment", "How does the clinical assessment work?", "You select symptoms and answer structured questions. The information is organized for clinical review."],
+      ["Assessment", "What happens after I complete an assessment?", "You can review the summary, find an available doctor, and create a queue token when appropriate."],
+      ["Assessment", "Can I use MedFlow without speaking?", "Yes. Every assessment field can be completed with the keyboard; voice input is optional."],
+      ["Documents", "Can I upload medical documents?", "Yes. Supported PDFs and images can be uploaded during intake and stored securely with the assessment."],
+      ["Documents", "How are my medical documents protected?", "Original files are stored in a private bucket and clinicians access them only through an authorized MedFlow session."],
+      ["Doctors & Appointments", "How does the doctor see my assessment?", "Only the doctor assigned to your authorized queue token can open that assessment in their workspace."],
+      ["Doctors & Appointments", "How does Find a Doctor work?", "Select a hospital and department to see the active doctors returned from that hospital's live data."],
+      ["Queue & Tokens", "What is the queue/token system?", "A token represents your place in the selected doctor's queue and can be followed in the live queue view."],
+      ["Queue & Tokens", "What does Now Serving mean?", "It shows the token currently being called or seen in that doctor's queue."],
+      ["Privacy & Security", "Is my information shared publicly?", "No. Medical information is limited to the authorized care workflow; public queue views use token information only."],
+      ["Accessibility", "How does voice input work?", "When enabled, voice input helps capture an answer. You can confirm or retry the recognized text before it is saved."],
+      ["Accessibility", "Why does MedFlow need microphone permission?", "Microphone permission is requested only when you choose to use voice input."],
+    ];
+    const categories = ["General", "Assessment", "Documents", "Doctors & Appointments", "Queue & Tokens", "Privacy & Security", "Accessibility"];
+    const search = faqSearch.trim().toLowerCase();
+    const visibleFaqs = faqItems.filter(([category, question, answer]) => category === faqCategory && (!search || `${question} ${answer}`.toLowerCase().includes(search)));
+    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main patient-section-main"><div className="care-discovery-container"><header className="records-header"><div><p className="eyebrow">Support</p><h1>Help & FAQ</h1><p>Find answers or get support with MedFlow.</p></div>{renderPatientHeaderActions()}</header><Card className="faq-search-card"><label className="admin-search"><Search size={17} /><input value={faqSearch} onChange={(event) => { setFaqSearch(event.target.value); setExpandedFaq(null); }} placeholder="Search common questions" aria-label="Search common questions" /></label></Card><section aria-label="FAQ categories"><div className="faq-category-tabs" role="tablist" aria-label="FAQ categories">{categories.map((category) => <button type="button" role="tab" aria-selected={faqCategory === category} key={category} className={faqCategory === category ? "active" : ""} onClick={() => { setFaqCategory(category); setExpandedFaq(null); }}>{category}</button>)}</div><div className="faq-list">{visibleFaqs.length ? visibleFaqs.map(([, question, answer], index) => { const id = `faq-answer-${faqCategory.replace(/[^a-z]/gi, "").toLowerCase()}-${index}`; return <Card key={question} className="faq-item"><button type="button" aria-expanded={expandedFaq === question} aria-controls={id} onClick={() => setExpandedFaq(expandedFaq === question ? null : question)}><span>{question}</span><ChevronDown size={20} className={expandedFaq === question ? "faq-chevron-open" : ""} /></button>{expandedFaq === question && <div id={id} className="faq-answer"><p>{answer}</p><button type="button" className="read-aloud-button" onClick={() => speak(`${question}. ${answer}`)} aria-label={`Read aloud: ${question}`}><Volume2 size={17} />Read Aloud</button></div>}</Card>; }) : <EmptyState title="No questions found" detail="Try another search term or category." />}</div></section><section className="help-grid"><Card><SectionHeader eyebrow="Contact Support" title="Demo support contacts" /><p><a href="mailto:medflowai@gmail.com">medflowai@gmail.com</a></p><p><a href="tel:+919876543210">+91 98765 43210</a> <span className="muted">(demo support)</span></p><p><a href="tel:18001234567">1800-123-4567</a> <span className="muted">(demo support)</span></p></Card><Card className="emergency-notice"><SectionHeader eyebrow="Important" title="Medical emergencies" /><p>For medical emergencies, contact your local emergency services or visit the nearest emergency department.</p></Card></section></div></main></div>;
+  }
+
   if (page === "hospital-token") {
     const selectedHospital = hospitals.find((hospital) => hospital.id === selectedHospitalId);
-    return <div className="queue-page"><Navbar setForm={setForm} showBack onBack={() => setPage("dashboard")} /><main className="queue-container platform-queue-container"><header className="queue-header"><Building2 size={28} /><div><p className="eyebrow">{t("platform.carePath")}</p><h1>{t("queue.chooseDoctor")}</h1><p>{t("queue.chooseDoctorDescription")}</p></div></header>{queueError && <div className="speech-error" role="alert">{queueError}</div>}<Card className="hospital-picker"><label className="queue-select-label">{t("queue.hospital")}<select value={selectedHospitalId} onChange={(event) => setSelectedHospitalId(event.target.value)} aria-label={t("queue.hospital")}>{hospitals.map((hospital) => <option key={hospital.id} value={hospital.id}>{hospital.name} Ã¢â‚¬â€ {hospital.address}</option>)}</select></label>{selectedHospital && <p className="queue-address"><Hospital size={17} /> {selectedHospital.address}</p>}</Card><section aria-live="polite" aria-busy={loadingQueueDoctors}><div className="section-heading"><div><p className="eyebrow">{t("platform.availableToday")}</p><h2>{t("platform.doctors")}</h2></div></div>{loadingQueueDoctors ? <LoadingState label={t("platform.loadingDoctors")} /> : queueDoctors.length > 0 ? <div className="doctor-queue-grid">{queueDoctors.map((doctor) => <Card className="doctor-queue-card" key={doctor.id}><div className="doctor-card-title"><span className="doctor-avatar"><Stethoscope size={22} /></span><div><h2>{doctor.name}</h2><p>{doctor.department}</p><small>{doctor.specialization}</small></div></div><StatusBadge status="success"><Radio size={12} /> {t("platform.available")}</StatusBadge><div className="queue-stat-grid"><div><span>{t("queue.nowServing")}</span><strong>{doctor.queue.displayCurrentToken || t("platform.notStarted")}</strong></div><div><span>{t("platform.waiting")}</span><strong>{doctor.queue.waitingCount} {t("platform.patients")}</strong></div></div><button type="button" className="btn-primary" onClick={() => createToken(doctor.id)}>{t("queue.getToken")}<Ticket size={16} /></button></Card>)}</div> : <EmptyState title={t("platform.noDoctors")} detail={t("platform.noDoctorsDetail")} />}</section>{activeToken && <section className="token-confirmation" aria-live="polite"><StatusBadge status="success"><CheckCircle2 size={14} />{t("platform.tokenConfirmed")}</StatusBadge><p className="token-display">{activeToken.displayToken || activeToken.tokenNumber}</p><h2>{activeToken.doctorName}</h2><p>{activeToken.department} Ã‚Â· {activeToken.hospitalName}</p><div className="token-metrics"><span>{t("queue.nowServing")}<strong>{activeToken.displayCurrentToken || t("platform.notStarted")}</strong></span><span>{t("queue.patientsAhead")}<strong>{activeToken.patientsAhead}</strong></span></div><div className="token-qr"><QRCodeSVG value={`${window.location.origin}/queue-status/${activeToken.id}`} size={150} level="M" includeMargin /><p>{t("platform.scanQueue")}</p></div><div className="token-actions"><button type="button" className="btn-primary" onClick={() => setPage("live-queue")}>{t("queue.viewLiveQueue")}</button><button type="button" className="btn-secondary" onClick={cancelActiveToken}>{t("platform.cancelToken")}</button></div></section>}</main></div>;
+    return <div className="queue-page"><Navbar setForm={setForm} showBack onBack={() => setPage("dashboard")} /><main className="queue-container platform-queue-container"><header className="queue-header"><Building2 size={28} /><div><p className="eyebrow">{t("platform.carePath")}</p><h1>{t("queue.chooseDoctor")}</h1><p>{t("queue.chooseDoctorDescription")}</p></div></header>{queueError && <div className="speech-error" role="alert">{queueError}</div>}<Card className="hospital-picker"><label className="queue-select-label">{t("queue.hospital")}<select value={selectedHospitalId} onChange={(event) => setSelectedHospitalId(event.target.value)} aria-label={t("queue.hospital")}>{hospitals.map((hospital) => <option key={hospital.id} value={hospital.id}>{hospital.name} — {hospital.address}</option>)}</select></label>{selectedHospital && <p className="queue-address"><Hospital size={17} /> {selectedHospital.address}</p>}</Card><section aria-live="polite" aria-busy={loadingQueueDoctors}><div className="section-heading"><div><p className="eyebrow">{t("platform.availableToday")}</p><h2>{t("platform.doctors")}</h2></div></div>{loadingQueueDoctors ? <LoadingState label={t("platform.loadingDoctors")} /> : queueDoctors.length > 0 ? <div className="doctor-queue-grid">{queueDoctors.map((doctor) => <Card className="doctor-queue-card" key={doctor.id}><div className="doctor-card-title"><span className="doctor-avatar"><Stethoscope size={22} /></span><div><h2>{doctor.name}</h2><p>{doctor.department}</p><small>{doctor.specialization}</small></div></div><StatusBadge status="success"><Radio size={12} /> {t("platform.available")}</StatusBadge><div className="queue-stat-grid"><div><span>{t("queue.nowServing")}</span><strong>{doctor.queue.displayCurrentToken || t("platform.notStarted")}</strong></div><div><span>{t("platform.waiting")}</span><strong>{doctor.queue.waitingCount} {t("platform.patients")}</strong></div></div><button type="button" className="btn-primary" onClick={() => createToken(doctor.id)}>{t("queue.getToken")}<Ticket size={16} /></button></Card>)}</div> : <EmptyState title={t("platform.noDoctors")} detail={t("platform.noDoctorsDetail")} />}</section>{activeToken && <section className="token-confirmation" aria-live="polite"><StatusBadge status="success"><CheckCircle2 size={14} />{t("platform.tokenConfirmed")}</StatusBadge><p className="token-display">{activeToken.displayToken || activeToken.tokenNumber}</p><h2>{activeToken.doctorName}</h2><p>{activeToken.department} · {activeToken.hospitalName}</p><div className="token-metrics"><span>{t("queue.nowServing")}<strong>{activeToken.displayCurrentToken || t("platform.notStarted")}</strong></span><span>{t("queue.patientsAhead")}<strong>{activeToken.patientsAhead}</strong></span></div><div className="token-qr"><QRCodeSVG value={`${window.location.origin}/queue-status/${activeToken.id}`} size={150} level="M" includeMargin /><p>{t("platform.scanQueue")}</p></div><div className="token-actions"><button type="button" className="btn-primary" onClick={() => setPage("live-queue")}>{t("queue.viewLiveQueue")}</button><button type="button" className="btn-secondary" onClick={cancelActiveToken}>{t("platform.cancelToken")}</button></div></section>}</main></div>;
   }
 
   if (page === "live-queue") {
@@ -1592,7 +1902,7 @@ function App() {
               <div className="hero-chip">
                 <span className="hero-chip-dot" />
                 <div className="badge">
-                  <span>Ã¢â€”Â</span>
+                  <span>â—</span>
                   {t("aiHealthcare")}
                 </div>
               </div>
@@ -1724,7 +2034,7 @@ function App() {
           <div className="form-card">
             <div className="form-header">
               <div className="badge">
-                <span>Ã¢â€”Â</span>
+                <span>â—</span>
                 {t("letsGetStarted")}
               </div>
               <h2>{t("tellUsAboutYourself")}</h2>
@@ -1957,7 +2267,7 @@ function App() {
                 <div className="intake-step-header">
                   <span className="intake-step-badge">
                     {t("intakeFlow.stepBadge2")}{" "}
-                    {selectedSystemObj ? `Ã‚Â· ${t(selectedSystemObj.titleKey)}` : ""}
+                    {selectedSystemObj ? `· ${t(selectedSystemObj.titleKey)}` : ""}
                   </span>
                   <h1 className="intake-step-title">
                     {t("intakeFlow.step2Title")}
@@ -2079,7 +2389,7 @@ function App() {
                         intakeData.severity
                       )}`}
                     >
-                      {intakeData.severity} / 10 Ã‚Â· {getSeverityLabel(intakeData.severity)}
+                      {intakeData.severity} / 10 · {getSeverityLabel(intakeData.severity)}
                     </span>
                   </div>
 
@@ -2406,7 +2716,7 @@ function App() {
                   {voiceDraft && (
                     <div className="voice-confirmation">
                       <strong>{t("accessibility.voiceResponse")}:</strong> {voiceDraft}
-                      <button type="button" onClick={() => { updateIntakeField("additionalInformation", intakeData.additionalInformation.trim() ? `${intakeData.additionalInformation.trim()} ${voiceDraft}` : voiceDraft); setVoiceDraft(""); }}><Check size={15} /> {t("accessibility.accept")}</button>
+                      <button type="button" onClick={() => { const existingNotes = String(intakeData.additionalInformation ?? "").trim(); const confirmedVoiceDraft = String(voiceDraft ?? "").trim(); updateIntakeField("additionalInformation", existingNotes && confirmedVoiceDraft ? `${existingNotes} ${confirmedVoiceDraft}` : existingNotes || confirmedVoiceDraft); setVoiceDraft(""); }}><Check size={15} /> {t("accessibility.accept")}</button>
                       <button type="button" onClick={() => { setVoiceDraft(""); startSpeechRecognition(); }}><RotateCcw size={15} /> {t("accessibility.tryAgain")}</button>
                     </div>
                   )}
@@ -2469,13 +2779,14 @@ function App() {
                         <FileText size={20} />
                         <div className="intake-document-meta">
                           <strong>{document.name}</strong>
-                          <span>{document.type.replace("image/", "").toUpperCase()} Ã‚Â· {formatFileSize(document.size)}</span>
+                          <span>{document.type.replace("image/", "").toUpperCase()} · {formatFileSize(document.size)}</span>
                           <span className="intake-document-status">
                             {document.status === "processing" && t("intakeFlow.processing")}
                             {document.status === "processed" && t("intakeFlow.processed")}
                             {document.status === "failed" && (document.error || t("intakeFlow.unableToProcess"))}
                           </span>
                         </div>
+                        {document.status === "processing" && renderDocumentScanner(document)}
                         {document.status === "failed" && (
                           <button type="button" className="document-action" onClick={() => processIntakeDocument(document)}>
                             <RotateCcw size={15} /> {t("intakeFlow.retry")}
@@ -2519,20 +2830,17 @@ function App() {
                   )}
                 </div>
                 {analyzingIntake ? (
-                  <>
-                    <div className="ai-pulse-orb">
-                      <Sparkles size={36} />
+                  <div className="ai-analysis-layout">
+                    <div className="ai-analysis-copy">
+                      <div className="ai-pulse-orb"><Sparkles size={36} /></div>
+                      <p className="ai-analysis-status"><span /> Preparing your structured summary</p>
+                      <h2 className="ai-analyzing-title">{t("intakeFlow.step6Title")}</h2>
+                      <p className="ai-analyzing-desc">{t("intakeFlow.step6Subtitle")}</p>
+                      <div className="ai-analysis-steps"><span>Reading the information you provided</span><span>Organizing document context</span><span>Preparing a clinician-readable summary</span></div>
+                      <div className="summary-loading-bar" style={{ marginTop: 30 }}><div /></div>
                     </div>
-                    <h2 className="ai-analyzing-title">
-                      {t("intakeFlow.step6Title")}
-                    </h2>
-                    <p className="ai-analyzing-desc">
-                      {t("intakeFlow.step6Subtitle")}
-                    </p>
-                    <div className="summary-loading-bar" style={{ marginTop: 30 }}>
-                      <div />
-                    </div>
-                  </>
+                    {renderDocumentScanner(intakeDocuments.find((document) => document.status === "processed") || intakeDocuments[0], "feature")}
+                  </div>
                 ) : (
                   <>
                     <AlertCircle
@@ -2818,6 +3126,15 @@ function App() {
                   </div>
                 </div>
 
+                <section className="recommended-care-card" aria-labelledby="recommended-care-title">
+                  <p className="eyebrow">Next step (optional)</p>
+                  <h2 id="recommended-care-title">Recommended Specialist: {clinicalSummary?.recommended_specialist?.specialty || "Care team review"}</h2>
+                  <p>{clinicalSummary?.recommended_specialist?.reason || "Based on the body system and symptoms you selected, you may consider consulting a relevant department."} This is informational guidance, not a diagnosis.</p>
+                  <button type="button" className="btn-secondary" onClick={() => setPage("find-doctor")}>
+                    <Stethoscope size={17} /> Find a Doctor
+                  </button>
+                </section>
+
                 {/* Safety Disclaimer */}
                 <div className="summary-notice" style={{ marginBottom: 24 }}>
                   <AlertCircle size={16} />
@@ -2856,11 +3173,11 @@ function App() {
   // =====================================================
 
   if (page === "documents") {
-    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main patient-section-main"><div className="records-container"><header className="records-header"><div><p className="eyebrow">{t("platform.patientPortal")}</p><h1>{t("auth.medicalDocuments")}</h1><p>{t("platform.documentsDescription")}</p></div><button type="button" className="btn-primary" onClick={() => { setIntakeStep(5); setPage("intake"); }}><Upload size={17} />{t("platform.uploadDocument")}</button></header><section className="patient-document-grid">{intakeDocuments.length ? intakeDocuments.map((document) => <Card key={document.id} className="patient-document-card"><div className="document-card-heading"><FileText size={20} /><div><strong>{document.name}</strong><p>{document.type || t("platform.medicalDocument")}</p></div><StatusBadge status={document.status === "processed" ? "success" : document.status === "failed" ? "danger" : "neutral"}>{document.status === "processed" ? t("auth.processed") : document.status === "failed" ? t("auth.failed") : t("auth.processing")}</StatusBadge></div>{document.extractedText && <div className="document-extract"><strong>{t("platform.extractedInformation")}</strong><p>{document.extractedText}</p></div>}{document.error && <p className="speech-error">{document.error}</p>}</Card>) : <EmptyState title={t("platform.noDocuments")} detail={t("platform.noDocumentsDetail")} />}</section><button type="button" className="btn-secondary" onClick={() => setPage("records")}>{t("medicalRecords")}</button></div></main></div>;
+    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main patient-section-main"><div className="records-container"><header className="records-header"><div><p className="eyebrow">{t("platform.patientPortal")}</p><h1>{t("auth.medicalDocuments")}</h1><p>{t("platform.documentsDescription")}</p></div><div className="records-header-actions">{renderPatientHeaderActions()}<button type="button" className="btn-primary" onClick={() => { setIntakeStep(5); setPage("intake"); }}><Upload size={17} />{t("platform.uploadDocument")}</button></div></header><section className="patient-document-grid">{intakeDocuments.length ? intakeDocuments.map((document) => <Card key={document.id} className="patient-document-card"><div className="document-card-heading"><FileText size={20} /><div><strong>{document.name}</strong><p>{document.type || t("platform.medicalDocument")}</p></div><StatusBadge status={document.status === "processed" ? "success" : document.status === "failed" ? "danger" : "neutral"}>{document.status === "processed" ? t("auth.processed") : document.status === "failed" ? t("auth.failed") : t("auth.processing")}</StatusBadge></div>{document.extractedText && <div className="document-extract"><strong>{t("platform.extractedInformation")}</strong><p>{document.extractedText}</p></div>}{document.error && <p className="speech-error">{document.error}</p>}</Card>) : <EmptyState title={t("platform.noDocuments")} detail={t("platform.noDocumentsDetail")} />}</section><button type="button" className="btn-secondary" onClick={() => setPage("records")}>{t("medicalRecords")}</button></div></main></div>;
   }
 
   if (page === "profile") {
-    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main patient-section-main"><div className="records-container"><header className="records-header"><div><p className="eyebrow">{t("platform.patientPortal")}</p><h1>{t("auth.profile")}</h1><p>{t("platform.profileDescription")}</p></div><LanguageSwitcher setForm={setForm} /></header><div className="profile-card-grid"><Card><h2>{t("platform.profileInformation")}</h2><p><strong>{t("auth.name")}:</strong> {authenticatedUser?.name || form.name || t("platform.notReported")}</p><p><strong>{t("auth.abha")}:</strong> {maskAbha(authenticatedUser?.abhaId)}</p><p><strong>{t("platform.language")}:</strong> {form.language}</p></Card><Card><h2>{t("accessibility.title")}</h2>{renderAccessibilityControls()}</Card></div></div></main></div>;
+    return <div className="patient-shell">{renderPatientSidebar()}<main className="patient-main patient-section-main"><div className="records-container"><header className="records-header"><div><p className="eyebrow">{t("platform.patientPortal")}</p><h1>{t("auth.profile")}</h1><p>{t("platform.profileDescription")}</p></div>{renderPatientHeaderActions()}</header>{demoResetNotice && <p className="demo-reset-notice" role="status">{demoResetNotice}</p>}<div className="profile-card-grid"><Card><h2>{t("platform.profileInformation")}</h2><p><strong>{t("auth.name")}:</strong> {authenticatedUser?.name || form.name || t("platform.notReported")}</p><p><strong>{t("auth.abha")}:</strong> {maskAbha(authenticatedUser?.abhaId)}</p><p><strong>{t("platform.language")}:</strong> {form.language}</p></Card><Card><h2>{t("accessibility.title")}</h2>{renderAccessibilityControls()}</Card>{authenticatedUser?.demo && <Card className="demo-environment-card"><SectionHeader eyebrow={t("platform.demoEnvironment")} title={t("platform.demoDataControls")} /><p>{t("platform.resetDemoDescription")}</p><button type="button" className="btn-secondary" onClick={() => { setDemoResetNotice(""); setShowDemoResetConfirm(true); }} disabled={resettingDemo}><RotateCcw size={17} />{t("platform.resetDemoData")}</button></Card>}</div></div>{showDemoResetConfirm && <div className="demo-reset-modal-backdrop" role="presentation"><section className="demo-reset-modal" role="dialog" aria-modal="true" aria-labelledby="demo-reset-title"><h2 id="demo-reset-title">{t("platform.resetAllDemoData")}</h2><p>{t("platform.resetDemoDescription")}</p><div className="token-actions"><button type="button" className="btn-secondary" onClick={() => setShowDemoResetConfirm(false)} disabled={resettingDemo}>{t("accessibility.cancel")}</button><button type="button" className="btn-primary" onClick={resetDemoData} disabled={resettingDemo}>{resettingDemo ? t("platform.resetting") : t("platform.resetDemo")}</button></div></section></div>}</main></div>;
   }
 
   if (page === "records") {
@@ -2880,7 +3197,8 @@ function App() {
           }}
         />}
 
-        <main className={isPatientPortal ? "patient-main patient-section-main records-container" : "records-container"}>
+        <main className={isPatientPortal ? "patient-main patient-section-main" : "records-container"}>
+          <div className={isPatientPortal ? "records-container" : undefined}>
           {/* HEADER */}
           <div className="records-header">
             <div>
@@ -2889,13 +3207,16 @@ function App() {
               <p>{t("medicalRecordsDescription")}</p>
             </div>
 
-            <button
-              className="upload-main-button"
-              onClick={() => setShowUpload(true)}
-            >
-              <Upload size={16} />
-              {t("uploadDocument")}
-            </button>
+            <div className="records-header-actions">
+              {isPatientPortal && renderPatientHeaderActions()}
+              <button
+                className="upload-main-button"
+                onClick={() => setShowUpload(true)}
+              >
+                <Upload size={16} />
+                {t("uploadDocument")}
+              </button>
+            </div>
           </div>
 
           {/* SECURITY */}
@@ -2909,6 +3230,8 @@ function App() {
             </div>
             <Lock size={18} />
           </div>
+
+          {isPatientPortal && <Card className="patient-physician-review"><SectionHeader eyebrow="Physician Review" title={patientClinicalReview?.status === "finalized" ? "Physician Reviewed Summary" : "Physician review"} actions={<StatusBadge status={patientClinicalReview?.status === "finalized" ? "success" : "neutral"}>{patientClinicalReview?.status === "finalized" ? "FINALIZED" : patientClinicalReview?.status === "draft" ? "UNDER REVIEW" : "AWAITING REVIEW"}</StatusBadge>} />{patientClinicalReviewState === "loading" ? <LoadingState label="Loading physician review…" /> : patientClinicalReview?.status === "finalized" ? <><p className="muted">Finalized {patientClinicalReview.finalizedAt ? new Date(patientClinicalReview.finalizedAt).toLocaleString() : ""}{patientClinicalReview.finalizedBy ? ` by ${patientClinicalReview.finalizedBy}` : ""}.</p><div className="doctor-summary-grid">{Object.entries(patientClinicalReview.reviewedSummary || {}).filter(([, value]) => Array.isArray(value) ? value.length : value).map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</strong><p>{Array.isArray(value) ? value.join(", ") : String(value)}</p></div>)}</div></> : <p className="muted">{patientClinicalReview?.status === "draft" ? "A physician is reviewing this assessment. The reviewed summary will appear here after finalization." : "Awaiting physician review."}</p>}</Card>}
 
           {/* CONTROLS */}
           <div className="records-controls">
@@ -2957,7 +3280,7 @@ function App() {
                     <strong>{doc.name}</strong>
                     <div className="record-sub">
                       <span>{doc.hospital}</span>
-                      <span>Ã¢â‚¬Â¢</span>
+                      <span>•</span>
                       <span>{doc.date}</span>
                     </div>
                   </div>
@@ -3003,8 +3326,8 @@ function App() {
                     <div className="extracted-section">
                       <span className="extracted-label">{t("intakeFlow.reviewPatient")}</span>
                       <p>
-                        {extractedData.data.patient.name || "N/A"} Ã‚Â·{" "}
-                        {extractedData.data.patient.age || "N/A"} Ã‚Â·{" "}
+                        {extractedData.data.patient.name || "N/A"} ·{" "}
+                        {extractedData.data.patient.age || "N/A"} ·{" "}
                         {extractedData.data.patient.gender || "N/A"}
                       </p>
                     </div>
@@ -3032,6 +3355,7 @@ function App() {
               )}
             </div>
           )}
+          </div>
         </main>
 
         {/* UPLOAD MODAL */}

@@ -28,7 +28,22 @@ from (values
   ('MedX District Hospital', 'Dr. Riya Nair', 'General Medicine', 'General Physician'),
   ('MedX District Hospital', 'Dr. Vivek Shah', 'Cardiology', 'Cardiology'),
   ('MedX District Hospital', 'Dr. Tara Iyer', 'Dermatology', 'Dermatology'),
-  ('MedX District Hospital', 'Dr. Neel Joshi', 'Orthopedics', 'Orthopedic Surgery')
+  ('MedX District Hospital', 'Dr. Neel Joshi', 'Orthopedics', 'Orthopedic Surgery'),
+  ('MedX Community Hospital', 'Dr. Saira Khan', 'General Medicine', 'Internal Medicine'),
+  ('MedX Community Hospital', 'Dr. Dev Arora', 'Dentistry', 'General Dentistry'),
+  ('MedX Community Hospital', 'Dr. Leena Mathew', 'Physiotherapy', 'Musculoskeletal Rehabilitation'),
+  ('MedX Community Hospital', 'Dr. Rohan Pillai', 'Radiology', 'Diagnostic Radiology'),
+  ('MedX Community Hospital', 'Dr. Kavya Menon', 'General Surgery', 'General Surgery'),
+  ('MedX Specialty Centre', 'Dr. Aditya Kulkarni', 'Gastroenterology', 'Gastroenterology'),
+  ('MedX Specialty Centre', 'Dr. Priya Bedi', 'Nephrology', 'Nephrology'),
+  ('MedX Specialty Centre', 'Dr. Manav Sethi', 'Urology', 'Urology'),
+  ('MedX Specialty Centre', 'Dr. Isha Verma', 'Psychiatry', 'Adult Psychiatry'),
+  ('MedX Specialty Centre', 'Dr. Farhan Ali', 'Endocrinology', 'Diabetes and Endocrinology'),
+  ('MedX Specialty Centre', 'Dr. Nidhi Chawla', 'Oncology', 'Medical Oncology'),
+  ('MedX District Hospital', 'Dr. Aditi Roy', 'Pediatrics', 'Pediatric Medicine'),
+  ('MedX District Hospital', 'Dr. Sameer Bhat', 'ENT', 'Otolaryngology'),
+  ('MedX District Hospital', 'Dr. Mitali Jain', 'Ophthalmology', 'Ophthalmology'),
+  ('MedX District Hospital', 'Dr. Harsh Vora', 'Gynecology', 'Gynecology')
 ) as v(hospital_name, name, department, specialization)
 join public.hospitals h on h.name = v.hospital_name
 where not exists (select 1 from public.doctors d where d.hospital_id = h.id and d.name = v.name);

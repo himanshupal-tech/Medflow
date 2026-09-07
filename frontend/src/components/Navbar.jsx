@@ -10,7 +10,7 @@ export default function Navbar({ setForm, onBack, showBack = false }) {
       <div className="navbar-left">
         {showBack && (
           <button className="back-btn" onClick={onBack}>
-            â† {t("back")}
+            ← {t("back")}
           </button>
         )}
 
@@ -21,7 +21,7 @@ export default function Navbar({ setForm, onBack, showBack = false }) {
 
       <div className="navbar-right">
         <span className="secure-badge">
-          ðŸ”’ {t("secure")}
+          🔒 {t("secure")}
         </span>
 
         <LanguageSwitcher setForm={setForm} />

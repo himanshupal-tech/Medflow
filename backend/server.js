@@ -16,6 +16,9 @@ const bcrypt = require("bcryptjs");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_DOCUMENT_JSON_BYTES = 15 * 1024 * 1024;
+const MAX_STT_AUDIO_SIZE_BYTES = 5 * 1024 * 1024;
 
 const CLIENT_ORIGINS = (process.env.MEDX_CLIENT_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
     .split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -28,7 +31,10 @@ app.use(cors({
     },
     credentials: true,
 }));
-app.use(express.json());
+// Original documents are persisted as base64 JSON after OCR/PDF extraction.
+// Allow the transport overhead for a 10 MB document, while the document limit
+// itself remains enforced below at 10 MB.
+app.use(express.json({ limit: MAX_DOCUMENT_JSON_BYTES }));
 
 const sarvam = new SarvamAIClient({
     apiSubscriptionKey: process.env.SARVAM_API_KEY
@@ -66,6 +72,39 @@ const languageCodes = {
 
 const upload = multer({
     storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_DOCUMENT_SIZE_BYTES },
+    fileFilter(_req, file, callback) {
+        const allowedTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
+        if (!allowedTypes.has(file.mimetype)) {
+            return callback(new Error("UNSUPPORTED_DOCUMENT_TYPE"));
+        }
+        return callback(null, true);
+    },
+});
+// Voice recordings must not use the document uploader above: Chrome records
+// microphone input as WebM, while the document uploader correctly accepts only
+// PDF and image files. Keep the two allowlists separate.
+const audioUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_STT_AUDIO_SIZE_BYTES },
+    fileFilter(_req, file, callback) {
+        const audioType = String(file.mimetype || "").split(";", 1)[0].trim().toLowerCase();
+        const allowedTypes = new Set([
+            "audio/webm",
+            "audio/ogg",
+            "audio/opus",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/mpeg",
+            "audio/mp4",
+            "audio/aac",
+            "audio/flac",
+        ]);
+        if (!allowedTypes.has(audioType)) {
+            return callback(new Error("UNSUPPORTED_AUDIO_TYPE"));
+        }
+        return callback(null, true);
+    },
 });
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
@@ -122,9 +161,15 @@ const CLINICAL_SUMMARY_RESPONSE_SCHEMA = {
             required: ["english", "hindi"],
             additionalProperties: false,
         },
+        recommended_specialist: {
+            type: "object",
+            properties: { specialty: { type: "string" }, reason: { type: "string" } },
+            required: ["specialty", "reason"],
+            additionalProperties: false,
+        },
         clinician_review_notes: { type: "string" },
     },
-    required: ["chief_concern", "clinical_presentation", "history_of_present_illness", "affected_body_system", "reported_symptoms", "severity", "duration", "symptom_progression", "relevant_medical_history", "current_medications", "allergies", "previous_similar_episodes", "recent_injury_surgery", "additional_information", "document_derived_information", "bilingual_summary", "clinician_review_notes"],
+    required: ["chief_concern", "clinical_presentation", "history_of_present_illness", "affected_body_system", "reported_symptoms", "severity", "duration", "symptom_progression", "relevant_medical_history", "current_medications", "allergies", "previous_similar_episodes", "recent_injury_surgery", "additional_information", "document_derived_information", "bilingual_summary", "recommended_specialist", "clinician_review_notes"],
     additionalProperties: false,
 };
 
@@ -297,6 +342,114 @@ async function getOrCreateDemoPatient() {
     }
 }
 
+// Resets only the records owned by the fixed prototype patient.  The patient
+// identifier is deliberately taken from the signed session rather than from
+// a request body, so this route cannot be used to erase another patient's
+// data.
+app.post("/api/demo/reset", async (req, res) => {
+    const session = readSession(req);
+    if (!session || session.role !== "patient" || !session.demo || !session.patientId) {
+        return res.status(403).json({ success: false, error: "This action is only available to the demo patient." });
+    }
+
+    try {
+        const { data: demoPatient, error: patientError } = await supabase
+            .from("patients")
+            .select("id")
+            .eq("id", session.patientId)
+            .eq("user_id", DEMO_USER_ID)
+            .maybeSingle();
+        if (patientError) throw patientError;
+        if (!demoPatient) return res.status(403).json({ success: false, error: "This action is only available to the demo patient." });
+
+        const { data: assessments, error: assessmentsError } = await supabase
+            .from("assessments")
+            .select("id")
+            .eq("patient_id", demoPatient.id);
+        if (assessmentsError) throw assessmentsError;
+        const assessmentIds = (assessments || []).map((assessment) => assessment.id);
+
+        // Tokens are selected independently so an old demo token can still be
+        // removed even if its assessment was already deleted manually.
+        const { data: tokens, error: tokensError } = await supabase
+            .from("tokens")
+            .select("id,doctor_id,token_number")
+            .eq("patient_id", demoPatient.id);
+        if (tokensError) throw tokensError;
+
+        let documents = [];
+        if (assessmentIds.length) {
+            const { data, error } = await supabase
+                .from("documents")
+                .select("id,storage_path")
+                .in("assessment_id", assessmentIds);
+            if (error) throw error;
+            documents = data || [];
+
+            const documentIds = documents.map((document) => document.id);
+            if (documentIds.length) {
+                const { error } = await supabase.from("document_findings").delete().in("document_id", documentIds);
+                if (error) throw error;
+            }
+
+            // These are assessment children.  A missing optional prototype
+            // table is harmless, while all real deletion failures are surfaced.
+            for (const table of ["clinical_reviews", "clinical_summaries", "clinical_history", "assessment_symptoms", "red_flags", "consents"]) {
+                const { error } = await supabase.from(table).delete().in("assessment_id", assessmentIds);
+                if (error && error.code !== "42P01" && error.code !== "PGRST205") throw error;
+            }
+
+            const { error: documentsDeleteError } = await supabase.from("documents").delete().in("assessment_id", assessmentIds);
+            if (documentsDeleteError) throw documentsDeleteError;
+        }
+
+        if ((tokens || []).length) {
+            const { error } = await supabase.from("tokens").delete().eq("patient_id", demoPatient.id);
+            if (error) throw error;
+        }
+
+        if (assessmentIds.length) {
+            const { error } = await supabase.from("assessments").delete().in("id", assessmentIds);
+            if (error) throw error;
+        }
+
+        // Delete stored originals only after their database references have
+        // gone. A missing object must not make the demo reset fail.
+        const storagePaths = documents
+            .map((document) => document.storage_path)
+            .filter((storagePath) => storagePath && !storagePath.startsWith("prototype://"));
+        if (storagePaths.length) {
+            const { error } = await supabase.storage.from("medical-documents").remove(storagePaths);
+            if (error) console.warn("Demo document storage cleanup warning:", error.message);
+        }
+
+        // Recalculate only queues touched by deleted demo tokens. This avoids
+        // clearing a real patient's current queue position.
+        const affectedDoctorIds = [...new Set((tokens || []).map((token) => token.doctor_id).filter(Boolean))];
+        for (const doctorId of affectedDoctorIds) {
+            const { data: activeToken, error: activeTokenError } = await supabase
+                .from("tokens")
+                .select("token_number")
+                .eq("doctor_id", doctorId)
+                .in("status", ["called", "in_consultation"])
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (activeTokenError) throw activeTokenError;
+            const { error: queueError } = await supabase
+                .from("doctor_queues")
+                .update({ current_token: activeToken?.token_number || 0, updated_at: new Date().toISOString() })
+                .eq("doctor_id", doctorId);
+            if (queueError) throw queueError;
+        }
+
+        return res.json({ success: true, message: "Demo data reset successfully." });
+    } catch (error) {
+        console.error("Demo reset error:", error);
+        return res.status(500).json({ success: false, error: "Unable to reset demo data. Please try again." });
+    }
+});
+
 function requireHospitalStaff(req, res, next) {
     const session = readSession(req);
     if (session?.role === "staff") {
@@ -331,21 +484,14 @@ function queueResponse(queue, token, patientsAhead = null) {
 }
 
 async function formatPatientToken(token) {
-    const { data: queue, error: queueError } = await supabase
-        .from("doctor_queues")
-        .select("current_token,queue_status")
-        .eq("doctor_id", token.doctor_id)
-        .maybeSingle();
-    if (queueError || !queue) throw queueError || new Error("Queue not found.");
-
     const activeStatuses = ["waiting", "called", "in_consultation"];
-    const { count, error: countError } = await supabase
-        .from("tokens")
-        .select("id", { count: "exact", head: true })
-        .eq("doctor_id", token.doctor_id)
-        .lt("token_number", token.token_number)
-        .in("status", activeStatuses);
-    if (countError) throw countError;
+    const [{ data: queue, error: queueError }, { count, error: countError }, { data: activeCurrent, error: currentError }] = await Promise.all([
+        supabase.from("doctor_queues").select("current_token,queue_status").eq("doctor_id", token.doctor_id).maybeSingle(),
+        supabase.from("tokens").select("id", { count: "exact", head: true }).eq("doctor_id", token.doctor_id).lt("token_number", token.token_number).in("status", activeStatuses),
+        supabase.from("tokens").select("token_number").eq("doctor_id", token.doctor_id).in("status", ["called", "in_consultation"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    if (queueError || !queue || countError || currentError) throw queueError || countError || currentError || new Error("Queue not found.");
+    const activeQueue = { ...queue, current_token: activeCurrent?.token_number || 0 };
 
     return {
         id: token.id,
@@ -356,7 +502,7 @@ async function formatPatientToken(token) {
         hospitalName: token.hospitals?.name || "",
         doctorName: token.doctors?.name || "",
         department: token.doctors?.department || "",
-        ...queueResponse(queue, token, count || 0),
+        ...queueResponse(activeQueue, token, count || 0),
     };
 }
 
@@ -716,7 +862,7 @@ app.put("/api/assessments/:assessmentId/clinical-summary", requireAssessmentOwne
 
 app.post("/api/assessments/:assessmentId/documents", requireAssessmentOwner, async (req, res) => {
     const { assessmentId } = req.params;
-    const { fileName, fileType, fileSize, extractedText, extractionMethod, findings } = req.body || {};
+    const { fileName, fileType, fileSize, extractedText, extractionMethod, findings, originalFileBase64 } = req.body || {};
     const validAssessmentId = typeof assessmentId === "string" &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assessmentId);
     const validExtractionMethods = new Set(["pdf-text", "ocr-local"]);
@@ -726,18 +872,25 @@ app.post("/api/assessments/:assessmentId/documents", requireAssessmentOwner, asy
     }
     if (typeof fileName !== "string" || !fileName.trim() || typeof fileType !== "string" || !fileType.trim() ||
         !Number.isInteger(fileSize) || fileSize < 0 || typeof extractedText !== "string" ||
-        !validExtractionMethods.has(extractionMethod) || (findings !== undefined && (findings === null || typeof findings !== "object" || Array.isArray(findings)))) {
+        !validExtractionMethods.has(extractionMethod) || typeof originalFileBase64 !== "string" || (findings !== undefined && (findings === null || typeof findings !== "object" || Array.isArray(findings)))) {
         return res.status(400).json({ success: false, error: "Provide valid processed document data." });
+    }
+    if (fileSize > MAX_DOCUMENT_SIZE_BYTES) {
+        return res.status(413).json({ success: false, error: "File is too large. Please upload a document smaller than 10 MB." });
     }
 
     const normalizedFileName = fileName.trim();
     const normalizedFileType = fileType.trim();
-    // No Supabase Storage upload exists yet. This stable reference identifies
-    // the processed payload without implying that the source file is stored.
     const documentFingerprint = createHash("sha256")
-        .update([normalizedFileName, normalizedFileType, String(fileSize), extractedText].join("\u0000"))
+        .update([normalizedFileName, normalizedFileType, String(fileSize), originalFileBase64].join("\u0000"))
         .digest("hex");
-    const storagePath = `prototype://assessments/${assessmentId}/documents/${documentFingerprint}`;
+    const safeName = normalizedFileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `assessments/${assessmentId}/documents/${documentFingerprint}-${safeName}`;
+    let originalFile;
+    try { originalFile = Buffer.from(originalFileBase64, "base64"); } catch { return res.status(400).json({ success: false, error: "Unable to save the original document." }); }
+    if (originalFile.length > MAX_DOCUMENT_SIZE_BYTES) {
+        return res.status(413).json({ success: false, error: "File is too large. Please upload a document smaller than 10 MB." });
+    }
 
     const findingRows = [];
     const findingTypes = ["patient", "symptoms", "diagnoses", "medications", "allergies", "vitals", "lab_results", "medical_history"];
@@ -779,6 +932,12 @@ app.post("/api/assessments/:assessmentId/documents", requireAssessmentOwner, asy
             return res.status(500).json({ success: false, error: "Unable to save the document." });
         }
 
+        if (!existingDocument) {
+            const { error: storageError } = await supabase.storage
+                .from("medical-documents")
+                .upload(storagePath, originalFile, { contentType: normalizedFileType, upsert: false });
+            if (storageError) return res.status(500).json({ success: false, error: "Unable to securely store the original document." });
+        }
         const documentData = {
             assessment_id: assessmentId,
             file_name: normalizedFileName,
@@ -792,6 +951,7 @@ app.post("/api/assessments/:assessmentId/documents", requireAssessmentOwner, asy
             ? await supabase.from("documents").update(documentData).eq("id", existingDocument.id).select().single()
             : await supabase.from("documents").insert(documentData).select().single();
         if (documentError) {
+            if (!existingDocument) await supabase.storage.from("medical-documents").remove([storagePath]);
             console.error("Supabase document save error:", documentError);
             return res.status(500).json({ success: false, error: "Unable to save the document." });
         }
@@ -972,7 +1132,7 @@ app.get("/api/staff/dashboard", requireHospitalStaff, async (req, res) => {
         const waiting = formattedTokens.filter((token) => token.status === "waiting");
         const current = formattedTokens.find((token) => ["called", "in_consultation"].includes(token.status)) || null;
         const completedToday = formattedTokens.filter((token) => token.status === "completed" && token.createdAt?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
-        return res.json({ success: true, doctor: { id: doctor.id, name: doctor.name, department: doctor.department, specialization: doctor.specialization, hospitalName: doctor.hospitals?.name || "" }, queue: { ...queueResponse(queue), tokenPrefix: prefix, displayCurrentToken: queue.current_token > 0 ? `${prefix}${String(queue.current_token).padStart(2, "0")}` : null, waitingCount: waiting.length }, current, waiting, completedToday });
+        return res.json({ success: true, doctor: { id: doctor.id, name: doctor.name, department: doctor.department, specialization: doctor.specialization, hospitalName: doctor.hospitals?.name || "" }, queue: { ...queueResponse(queue), tokenPrefix: prefix, displayCurrentToken: current?.displayToken || null, waitingCount: waiting.length }, current, waiting, completedToday });
     } catch (error) {
         console.error("Staff dashboard error:", error);
         return res.status(500).json({ success: false, error: "Unable to load the staff dashboard." });
@@ -1041,6 +1201,128 @@ app.get("/api/staff/tokens/:tokenId/assessment", requireHospitalStaff, async (re
         console.error("Staff assessment view error:", error);
         return res.status(500).json({ success: false, error: "Unable to load the patient assessment." });
     }
+});
+
+app.get("/api/staff/tokens/:tokenId/documents/:documentId/view", requireHospitalStaff, async (req, res) => {
+  try {
+    const doctorId = req.medxSession?.doctorId;
+    const { data: token, error: tokenError } = await supabase.from("tokens").select("doctor_id,assessment_id").eq("id", req.params.tokenId).maybeSingle();
+    if (tokenError) throw tokenError;
+    if (!token || token.doctor_id !== doctorId) return res.status(403).json({ success:false,error:"Unable to open this document." });
+    const { data: document, error: documentError } = await supabase.from("documents").select("file_name,file_type,storage_path,assessment_id").eq("id", req.params.documentId).maybeSingle();
+    if (documentError) throw documentError;
+    if (!document || document.assessment_id !== token.assessment_id || !document.storage_path || document.storage_path.startsWith("prototype://")) return res.status(404).json({ success:false,error:"Unable to open this document." });
+    const { data:file, error: storageError } = await supabase.storage.from("medical-documents").download(document.storage_path);
+    if (storageError || !file) return res.status(404).json({ success:false,error:"Unable to open this document." });
+    res.setHeader("Content-Type", document.file_type || "application/octet-stream"); res.setHeader("Content-Disposition", `inline; filename="${document.file_name.replace(/[\r\n"]/g, "_")}"`);
+    return res.send(Buffer.from(await file.arrayBuffer()));
+  } catch (error) { console.error("Protected document view error:", error); return res.status(500).json({success:false,error:"Unable to open this document."}); }
+});
+
+async function authorizedReviewContext(req) {
+    const doctorId = req.medxSession?.doctorId;
+    if (!doctorId) return { error: { status: 403, message: "A doctor-scoped staff session is required." } };
+    const { data: token, error } = await supabase.from("tokens")
+        .select("id,doctor_id,assessment_id").eq("id", req.params.tokenId).maybeSingle();
+    if (error) throw error;
+    if (!token || token.doctor_id !== doctorId) return { error: { status: 403, message: "You do not have access to this physician review." } };
+    return { token, doctorId };
+}
+
+app.get("/api/staff/tokens/:tokenId/review", requireHospitalStaff, async (req, res) => {
+    try {
+        const context = await authorizedReviewContext(req);
+        if (context.error) return res.status(context.error.status).json({ success: false, error: context.error.message });
+        const { data: review, error } = await supabase.from("clinical_reviews")
+            .select("id,assessment_id,doctor_id,original_summary_snapshot,reviewed_summary,status,finalized_at,finalized_by,created_at,updated_at")
+            .eq("assessment_id", context.token.assessment_id).maybeSingle();
+        if (error) throw error;
+        return res.json({ success: true, review: review || null });
+    } catch (error) { console.error("Clinical review load error:", error); return res.status(500).json({ success: false, error: "Unable to load the physician review." }); }
+});
+
+app.put("/api/staff/tokens/:tokenId/review", requireHospitalStaff, async (req, res) => {
+    try {
+        const context = await authorizedReviewContext(req);
+        if (context.error) return res.status(context.error.status).json({ success: false, error: context.error.message });
+        const reviewedSummary = req.body?.reviewedSummary;
+        if (!reviewedSummary || typeof reviewedSummary !== "object" || Array.isArray(reviewedSummary)) return res.status(400).json({ success: false, error: "A physician-reviewed English summary is required." });
+        const { data: existing, error: existingError } = await supabase.from("clinical_reviews").select("id,status,assessment_id").eq("assessment_id", context.token.assessment_id).maybeSingle();
+        if (existingError) throw existingError;
+        if (existing?.status === "finalized") return res.status(409).json({ success: false, error: "This clinical summary has been finalized and is read-only." });
+        let review;
+        if (existing) {
+            const { data, error } = await supabase.from("clinical_reviews").update({ reviewed_summary: reviewedSummary, updated_at: new Date().toISOString() }).eq("id", existing.id).select().single();
+            if (error) throw error; review = data;
+        } else {
+            const { data: summary, error: summaryError } = await supabase.from("clinical_summaries").select("english_summary").eq("assessment_id", context.token.assessment_id).maybeSingle();
+            if (summaryError) throw summaryError;
+            if (!summary?.english_summary) return res.status(400).json({ success: false, error: "An AI-generated English summary is required before physician review." });
+            const { data, error } = await supabase.from("clinical_reviews").insert({ assessment_id: context.token.assessment_id, doctor_id: context.doctorId, original_summary_snapshot: summary.english_summary, reviewed_summary: reviewedSummary, status: "draft" }).select().single();
+            if (error) throw error; review = data;
+        }
+        return res.json({ success: true, review });
+    } catch (error) { console.error("Clinical review save error:", error); return res.status(500).json({ success: false, error: "Unable to save the physician review." }); }
+});
+
+app.post("/api/staff/tokens/:tokenId/review/finalize", requireHospitalStaff, async (req, res) => {
+    try {
+        const context = await authorizedReviewContext(req);
+        if (context.error) return res.status(context.error.status).json({ success: false, error: context.error.message });
+        const { data: review, error: lookupError } = await supabase.from("clinical_reviews").select("id,status").eq("assessment_id", context.token.assessment_id).maybeSingle();
+        if (lookupError) throw lookupError;
+        if (!review) return res.status(404).json({ success: false, error: "Save a physician review before finalizing it." });
+        if (review.status === "finalized") return res.status(409).json({ success: false, error: "This clinical summary has already been finalized and is read-only." });
+        const { data: token, error: tokenError } = await supabase.from("tokens")
+            .select("id,doctor_id,assessment_id,status")
+            .eq("id", context.token.id)
+            .maybeSingle();
+        if (tokenError) throw tokenError;
+        if (!token || token.doctor_id !== context.doctorId || token.assessment_id !== context.token.assessment_id) {
+            return res.status(403).json({ success: false, error: "You do not have access to this queue token." });
+        }
+        if (!["waiting", "called", "in_consultation"].includes(token.status)) {
+            return res.status(409).json({ success: false, error: "This queue token is no longer active." });
+        }
+        const now = new Date().toISOString();
+        const { data, error } = await supabase.from("clinical_reviews").update({ status: "finalized", finalized_at: now, finalized_by: context.doctorId, updated_at: now }).eq("id", review.id).select().single();
+        if (error) throw error;
+        const { data: completedToken, error: completionError } = await supabase.from("tokens")
+            .update({ status: "completed", completed_at: now })
+            .eq("id", token.id)
+            .eq("doctor_id", context.doctorId)
+            .in("status", ["waiting", "called", "in_consultation"])
+            .select("id,status,completed_at")
+            .maybeSingle();
+        if (completionError) throw completionError;
+        if (!completedToken) return res.status(409).json({ success: false, error: "This queue token is no longer active." });
+        return res.json({ success: true, review: data, token: completedToken });
+    } catch (error) { console.error("Clinical review finalize error:", error); return res.status(500).json({ success: false, error: "Unable to finalize the physician review." }); }
+});
+
+app.get("/api/patient/assessments/:assessmentId/clinical-review", requireRole("patient"), async (req, res) => {
+    try {
+        const { data: assessment, error: assessmentError } = await supabase.from("assessments")
+            .select("id,patient_id").eq("id", req.params.assessmentId).maybeSingle();
+        if (assessmentError) throw assessmentError;
+        if (!assessment || assessment.patient_id !== req.medxSession.patientId) return res.status(403).json({ success: false, error: "You do not have access to this physician review." });
+        const { data: review, error } = await supabase.from("clinical_reviews")
+            .select("assessment_id,reviewed_summary,status,finalized_at,finalized_by")
+            .eq("assessment_id", assessment.id).maybeSingle();
+        if (error) throw error;
+        if (!review) return res.status(404).json({ success: false, error: "Physician review is not available yet." });
+        const response = { assessmentId: review.assessment_id, status: review.status };
+        if (review.status === "finalized") {
+            let finalizedBy = null;
+            if (review.finalized_by) {
+                const { data: doctor, error: doctorError } = await supabase.from("doctors").select("name").eq("id", review.finalized_by).maybeSingle();
+                if (doctorError) throw doctorError;
+                finalizedBy = doctor?.name || null;
+            }
+            Object.assign(response, { reviewedSummary: review.reviewed_summary, finalizedAt: review.finalized_at, finalizedBy });
+        }
+        return res.json({ success: true, review: response });
+    } catch (error) { console.error("Patient clinical review load error:", error); return res.status(500).json({ success: false, error: "Unable to load the physician review." }); }
 });
 
 app.get("/api/admin/overview", requireRole("admin"), async (_req, res) => {
@@ -1115,13 +1397,8 @@ app.get("/api/public/queue-status/:tokenId", async (req, res) => {
     const { data: token, error } = await supabase.from("tokens").select("id,token_number,status,doctor_id,doctors(name,department),hospitals(name)").eq("id", req.params.tokenId).maybeSingle();
     if (error || !token) return res.status(404).json({ success: false, error: "Queue status was not found." });
     try {
-        const { data: queue, error: queueError } = await supabase.from("doctor_queues").select("current_token,queue_status").eq("doctor_id", token.doctor_id).maybeSingle();
-        if (queueError || !queue) throw queueError || new Error("Queue not found.");
-        const prefix = tokenPrefixForDepartment(token.doctors?.department);
-        const activeStatuses = ["waiting", "called", "in_consultation"];
-        const { count, error: countError } = await supabase.from("tokens").select("id", { count: "exact", head: true }).eq("doctor_id", token.doctor_id).lt("token_number", token.token_number).in("status", activeStatuses);
-        if (countError) throw countError;
-        return res.json({ success: true, queue: { displayToken: `${prefix}${String(token.token_number).padStart(2, "0")}`, doctorName: token.doctors?.name || "", hospitalName: token.hospitals?.name || "", currentToken: queue.current_token > 0 ? `${prefix}${String(queue.current_token).padStart(2, "0")}` : null, queueStatus: queue.queue_status, patientsAhead: count || 0, status: token.status } });
+        const formatted = await formatPatientToken(token);
+        return res.json({ success: true, queue: { displayToken: formatted.displayToken, doctorName: formatted.doctorName, hospitalName: formatted.hospitalName, currentToken: formatted.displayCurrentToken, queueStatus: formatted.queueStatus, patientsAhead: formatted.patientsAhead, status: formatted.status } });
     } catch (queueError) {
         console.error("Public queue status error:", queueError);
         return res.status(500).json({ success: false, error: "Queue status is temporarily unavailable." });
@@ -1993,6 +2270,7 @@ STRICT MEDICAL & ETHICAL RULES:
 11. Respect the patient's preferred language (${preferredLanguage}) where appropriate, ensuring concise and accurate clinical phrasing.
 12. Write for a clinician reviewing an intake: convert selections into concise, grammatically complete clinical prose. Do not merely repeat option labels or produce a checklist. Do not add a diagnosis, interpretation, treatment, or any fact not explicitly supplied.
 13. Populate bilingual_summary in both English and medically natural Hindi. Both versions must contain the same explicitly supported facts; do not translate a question-answer transcript or invent missing information.
+14. Populate recommended_specialist with a specialty TYPE only, never a doctor name. Use a conservative routing suggestion grounded only in the structured assessment, and state that it may be appropriate for review. This is not a diagnosis or emergency decision.
 
 Output JSON format:
 {
@@ -2015,6 +2293,7 @@ Output JSON format:
     "english": { "chiefComplaint": "", "historyOfPresentingComplaint": "", "symptoms": [], "severity": "", "duration": "", "progression": "", "pastMedicalHistory": [], "medications": [], "allergies": [], "relevantDocumentFindings": [], "additionalRemarks": "", "missingInformation": [] },
     "hindi": { "chiefComplaint": "", "historyOfPresentingComplaint": "", "symptoms": [], "severity": "", "duration": "", "progression": "", "pastMedicalHistory": [], "medications": [], "allergies": [], "relevantDocumentFindings": [], "additionalRemarks": "", "missingInformation": [] }
   },
+  "recommended_specialist": { "specialty": "Relevant department or specialty", "reason": "Short patient-safe routing explanation based on reported assessment information" },
   "clinician_review_notes": "Objective, non-diagnostic items for physician review"
 }
 `;
@@ -2545,39 +2824,67 @@ app.post(
     }
 );
 
-app.post("/api/sarvam/stt", upload.single("audio"), async (req, res) => {
+app.post("/api/sarvam/stt", audioUpload.single("audio"), async (req, res) => {
   try {
-    if (!req.file) {
+    if (!req.file || !Buffer.isBuffer(req.file.buffer) || req.file.size <= 0) {
       return res.status(400).json({
         success: false,
-        error: "No audio file received",
+        error: "No recorded audio was received.",
+        code: "EMPTY_AUDIO",
       });
     }
 
-    const language = req.body.language || "English";
-    const languageCode = languageCodes[language] || "en-IN";
+    const language = String(req.body.language || "").trim();
+    const languageCode = languageCodes[language] || (Object.values(languageCodes).includes(language) ? language : null);
+    if (!languageCode) {
+      return res.status(400).json({
+        success: false,
+        error: "The selected speech language is not supported.",
+        code: "INVALID_LANGUAGE",
+      });
+    }
 
-    console.log("Sarvam STT language:", language);
-    console.log("Language code:", languageCode);
+    console.info("Sarvam STT request received:", {
+      audioSizeBytes: req.file.size,
+      mimeType: req.file.mimetype,
+      languageCode,
+    });
 
     const result = await sarvam.speechToText.transcribe({
-      file: req.file.buffer,
+      file: {
+        data: req.file.buffer,
+        filename: req.file.originalname || "recording.webm",
+        contentType: req.file.mimetype,
+        contentLength: req.file.size,
+      },
       model: "saaras:v3",
       language_code: languageCode,
     });
 
-    console.log("Sarvam STT:", result);
+    if (typeof result?.transcript !== "string" || !result.transcript.trim()) {
+      console.warn("Sarvam STT returned an empty transcript.", { languageCode });
+      return res.status(422).json({
+        success: false,
+        error: "No speech could be recognized from the recording.",
+        code: "EMPTY_TRANSCRIPT",
+      });
+    }
 
     res.json({
       success: true,
-      transcript: result.transcript,
+      transcript: result.transcript.trim(),
     });
   } catch (error) {
-    console.error("Sarvam STT Error:", error);
+    const status = Number(error?.statusCode || error?.status || error?.response?.status);
+    console.error("Sarvam STT request failed:", {
+      status: Number.isInteger(status) ? status : "unknown",
+      message: typeof error?.message === "string" ? error.message : "No error message returned",
+    });
 
-    res.status(500).json({
+    res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
       success: false,
-      error: error.message,
+      error: "Speech transcription is temporarily unavailable. Please try again.",
+      code: "SARVAM_STT_FAILED",
     });
   }
 });
@@ -2706,6 +3013,27 @@ app.get("/test", (req, res) => {
     });
 });
 
+// Keep upload/parser failures patient-safe instead of exposing Multer or
+// Express internals. This applies to every document upload route above.
+app.use((error, _req, res, next) => {
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+        if (_req.path === "/api/sarvam/stt") {
+            return res.status(413).json({ success: false, error: "Voice recording is too large. Please record a shorter response.", code: "AUDIO_TOO_LARGE" });
+        }
+        return res.status(413).json({ success: false, error: "File is too large. Please upload a document smaller than 10 MB." });
+    }
+    if (error?.type === "entity.too.large") {
+        return res.status(413).json({ success: false, error: "File is too large. Please upload a document smaller than 10 MB." });
+    }
+    if (error?.message === "UNSUPPORTED_DOCUMENT_TYPE") {
+        return res.status(400).json({ success: false, error: "Only PDF, JPEG, and PNG medical documents are supported." });
+    }
+    if (error?.message === "UNSUPPORTED_AUDIO_TYPE") {
+        return res.status(400).json({ success: false, error: "This audio format is not supported for voice input.", code: "UNSUPPORTED_AUDIO_TYPE" });
+    }
+    return next(error);
+});
+
 // ======================================================
 // START SERVER
 // ======================================================
@@ -2745,13 +3073,24 @@ app.post("/api/auth/role-login", async (req, res) => {
             issueSession(res, DEMO_ADMIN);
             return res.json({ success: true, user: DEMO_ADMIN });
         }
-        const { data: doctor, error } = await supabase
+        const { data: assignedToken, error: assignedTokenError } = await supabase
+            .from("tokens")
+            .select("doctor_id,doctors!inner(id,name,hospital_id,department,specialization,is_active)")
+            .in("status", ["waiting", "called", "in_consultation"])
+            .eq("doctors.is_active", true)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (assignedTokenError) throw assignedTokenError;
+        const assignedDoctor = assignedToken?.doctors;
+        const { data: fallbackDoctor, error } = await supabase
             .from("doctors")
             .select("id,name,hospital_id,department,specialization")
             .eq("is_active", true)
             .order("name")
             .limit(1)
             .maybeSingle();
+        const doctor = assignedDoctor || fallbackDoctor;
         if (error || !doctor) {
             console.error("Demo staff lookup error:", error);
             return res.status(503).json({ success: false, error: "No active doctor is available for the staff demo." });
