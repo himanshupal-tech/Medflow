@@ -4154,7 +4154,7 @@ resources.en.translation.platform = {
   startingAssessment: "Starting assessment…", patientPortal: "PATIENT PORTAL", documentsDescription: "Review documents associated with your current assessment and their extracted information.",
   uploadDocument: "Upload document", medicalDocument: "Medical document", extractedInformation: "Extracted information",
   noDocuments: "No documents have been uploaded.", noDocumentsDetail: "You can add an optional PDF, JPG, or PNG during your clinical intake.",
-  profileDescription: "Manage your profile details and accessibility preferences.", profileInformation: "Profile information", language: "Language",
+  profileDescription: "Manage your profile details and accessibility preferences.", profileInformation: "Profile information", profileName: "Name", accessibility: "Accessibility", language: "Language",
   uploadedMedicalRecords: "Uploaded medical records", noDocumentsForAssessment: "No uploaded documents are linked to this assessment.", noDocumentFindings: "No extracted findings are available.",
   noDocumentsForAssessmentDetail: "No medical records were uploaded for this assessment.", analysed: "Analysed", noFindings: "No findings", findings: "Findings",
   additionalFindings: "{{count}} additional findings are available.",
@@ -4185,6 +4185,111 @@ resources.en.translation.platform = {
 resources.en.translation.patientFind = {
   eyebrow: "Care options", title: "Find a Doctor", description: "Based on the information provided, these departments and doctors may be relevant. This is not a diagnosis.",
   skip: "Skip for now", recommendedSpecialist: "Recommended Specialist", chooseDepartment: "Choose a department", chooseHospital: "Choose Hospital", selectHospital: "Select a hospital", chooseDepartmentLabel: "Choose Department", selectDepartment: "Select a department", chooseDoctor: "Choose Doctor", loadingDepartments: "Loading departments…", loadingDoctors: "Loading available doctors…", noDepartments: "No active departments are currently available at this hospital.", noDoctors: "No active doctors are currently available in this department.", chooseDepartmentDetail: "Choose a department to view doctors.", tryAnother: "Try another department or hospital.", liveDataDetail: "Doctor availability is shown from the selected hospital's live data.", specializationMissing: "Specialization not provided", available: "Available", queueUnavailable: "Queue unavailable", nowServing: "Now serving", queue: "Queue", patients: "patients", confirmToken: "Confirm Doctor & Get Token", reason: "Based on the information provided, this assessment may be appropriate for review by {{department}}. You can choose any available department below.", selectCare: "Choose a hospital and department to see available doctors.", doctorDiscovery: "Doctor discovery", step: "Step {{number}}",
+};
+
+resources.en.translation.patientFaq = {
+  eyebrow: "Support", title: "Help & FAQ", description: "Find answers or get support with MedFlow.", search: "Search common questions", categoriesLabel: "FAQ categories", readAloud: "Read aloud", readAloudAria: "Read aloud: {{question}}", emptyTitle: "No questions found", emptyDetail: "Try another search term or category.", contactEyebrow: "Contact support", contactTitle: "Demo support contacts", demoSupport: "demo support", important: "Important", emergencyTitle: "Medical emergencies", emergencyDetail: "For medical emergencies, contact your local emergency services or visit the nearest emergency department.",
+  categories: { general: "General", assessment: "Assessment", documents: "Documents", doctors: "Doctors & appointments", queue: "Queue & tokens", privacy: "Privacy & security", accessibility: "Accessibility" },
+  items: [
+    { id: "what-is-medflow", category: "general", question: "What is MedFlow?", answer: "MedFlow helps you organize information you choose to provide, complete a structured assessment, and find available care options." },
+    { id: "how-medflow-works", category: "general", question: "How does MedFlow work?", answer: "You complete an assessment, can upload supporting documents, review a structured summary, and optionally choose an available doctor." },
+    { id: "medflow-doctor", category: "general", question: "Is MedFlow a doctor?", answer: "No. MedFlow is a health-information and care-navigation tool; it does not replace a clinician." },
+    { id: "medflow-diagnosis", category: "general", question: "Can MedFlow diagnose me?", answer: "No. The assessment and summary are informational and must not be treated as a diagnosis." },
+    { id: "assessment-how", category: "assessment", question: "How does the clinical assessment work?", answer: "You select symptoms and answer structured questions. The information is organized for clinical review." },
+    { id: "assessment-next", category: "assessment", question: "What happens after I complete an assessment?", answer: "You can review the summary, find an available doctor, and create a queue token when appropriate." },
+    { id: "assessment-speaking", category: "assessment", question: "Can I use MedFlow without speaking?", answer: "Yes. Every assessment field can be completed with the keyboard; voice input is optional." },
+    { id: "documents-upload", category: "documents", question: "Can I upload medical documents?", answer: "Yes. Supported PDFs and images can be uploaded during intake and stored securely with the assessment." },
+    { id: "documents-protection", category: "documents", question: "How are my medical documents protected?", answer: "Original files are stored in a private bucket and clinicians access them only through an authorized MedFlow session." },
+    { id: "doctor-assessment", category: "doctors", question: "How does the doctor see my assessment?", answer: "Only the doctor assigned to your authorized queue token can open that assessment in their workspace." },
+    { id: "find-doctor", category: "doctors", question: "How does Find a Doctor work?", answer: "Select a hospital and department to see the active doctors returned from that hospital's live data." },
+    { id: "queue-token", category: "queue", question: "What is the queue/token system?", answer: "A token represents your place in the selected doctor's queue and can be followed in the live queue view." },
+    { id: "now-serving", category: "queue", question: "What does Now Serving mean?", answer: "It shows the token currently being called or seen in that doctor's queue." },
+    { id: "public-information", category: "privacy", question: "Is my information shared publicly?", answer: "No. Medical information is limited to the authorized care workflow; public queue views use token information only." },
+    { id: "voice-input", category: "accessibility", question: "How does voice input work?", answer: "When enabled, voice input helps capture an answer. You can confirm or retry the recognized text before it is saved." },
+    { id: "microphone", category: "accessibility", question: "Why does MedFlow need microphone permission?", answer: "Microphone permission is requested only when you choose to use voice input." },
+  ],
+};
+
+resources.en.translation.platform = {
+  ...resources.en.translation.platform,
+  patientsAhead: "Patients ahead",
+  viewLiveQueue: "View full queue",
+  logout: "Log out",
+  accessibility: "Accessibility",
+};
+
+resources.gu.translation.patientFind = {
+  eyebrow: "સારવારના વિકલ્પો", title: "ડૉક્ટર શોધો", description: "આપેલી માહિતીના આધારે આ વિભાગો અને ડૉક્ટરો યોગ્ય હોઈ શકે છે. આ નિદાન નથી.",
+  skip: "હમણાં માટે છોડો", recommendedSpecialist: "ભલામણ કરેલ નિષ્ણાત", chooseDepartment: "વિભાગ પસંદ કરો", chooseHospital: "હોસ્પિટલ પસંદ કરો", selectHospital: "હોસ્પિટલ પસંદ કરો", chooseDepartmentLabel: "વિભાગ પસંદ કરો", selectDepartment: "વિભાગ પસંદ કરો", chooseDoctor: "ડૉક્ટર પસંદ કરો", loadingDepartments: "વિભાગો લોડ થઈ રહ્યા છે…", loadingDoctors: "ઉપલબ્ધ ડૉક્ટરો લોડ થઈ રહ્યા છે…", noDepartments: "આ હોસ્પિટલમાં હાલમાં કોઈ સક્રિય વિભાગ ઉપલબ્ધ નથી.", noDoctors: "આ વિભાગમાં હાલમાં કોઈ સક્રિય ડૉક્ટર ઉપલબ્ધ નથી.", chooseDepartmentDetail: "ડૉક્ટરો જોવા માટે વિભાગ પસંદ કરો.", tryAnother: "બીજો વિભાગ અથવા હોસ્પિટલ અજમાવો.", liveDataDetail: "ડૉક્ટરની ઉપલબ્ધતા પસંદ કરેલી હોસ્પિટલના લાઇવ ડેટામાંથી બતાવવામાં આવે છે.", specializationMissing: "વિશેષતા આપવામાં આવી નથી", available: "ઉપલબ્ધ", queueUnavailable: "કતાર ઉપલબ્ધ નથી", nowServing: "હવે સેવા આપવામાં આવે છે", queue: "કતાર", patients: "દર્દીઓ", confirmToken: "ડૉક્ટરની પુષ્ટિ કરો અને ટોકન લો", reason: "આપેલી માહિતીના આધારે આ મૂલ્યાંકન {{department}} દ્વારા સમીક્ષા માટે યોગ્ય હોઈ શકે છે. નીચે કોઈપણ ઉપલબ્ધ વિભાગ પસંદ કરી શકો છો.", selectCare: "ઉપલબ્ધ ડૉક્ટરો જોવા માટે હોસ્પિટલ અને વિભાગ પસંદ કરો.", doctorDiscovery: "ડૉક્ટર શોધ", step: "પગલું {{number}}",
+};
+
+resources.gu.translation.patientFaq = {
+  eyebrow: "સહાય", title: "મદદ અને પ્રશ્નોત્તરી", description: "MedFlow વિશે જવાબો મેળવો અથવા સહાય મેળવો.", search: "સામાન્ય પ્રશ્નો શોધો", categoriesLabel: "પ્રશ્નોત્તરી શ્રેણીઓ", readAloud: "વાંચી સંભળાવો", readAloudAria: "વાંચી સંભળાવો: {{question}}", emptyTitle: "કોઈ પ્રશ્ન મળ્યો નથી", emptyDetail: "બીજો શોધ શબ્દ અથવા શ્રેણી અજમાવો.", contactEyebrow: "સહાયનો સંપર્ક", contactTitle: "ડેમો સહાય સંપર્કો", demoSupport: "ડેમો સહાય", important: "મહત્વપૂર્ણ", emergencyTitle: "તબીબી કટોકટી", emergencyDetail: "તબીબી કટોકટી માટે સ્થાનિક ઇમરજન્સી સેવાઓનો સંપર્ક કરો અથવા નજીકના ઇમરજન્સી વિભાગમાં જાઓ.",
+  categories: { general: "સામાન્ય", assessment: "મૂલ્યાંકન", documents: "દસ્તાવેજો", doctors: "ડૉક્ટરો અને મુલાકાતો", queue: "કતાર અને ટોકન", privacy: "ગોપનીયતા અને સુરક્ષા", accessibility: "સુલભતા" },
+  items: [
+    { id: "what-is-medflow", category: "general", question: "MedFlow શું છે?", answer: "MedFlow તમને આપેલી માહિતી ગોઠવવામાં, રચનાત્મક મૂલ્યાંકન પૂર્ણ કરવામાં અને ઉપલબ્ધ સારવાર વિકલ્પો શોધવામાં મદદ કરે છે." },
+    { id: "how-medflow-works", category: "general", question: "MedFlow કેવી રીતે કાર્ય કરે છે?", answer: "તમે મૂલ્યાંકન પૂર્ણ કરો છો, સહાયક દસ્તાવેજો અપલોડ કરી શકો છો, ગોઠવેલ સારાંશ જુઓ છો અને ઉપલબ્ધ ડૉક્ટર પસંદ કરી શકો છો." },
+    { id: "medflow-doctor", category: "general", question: "શું MedFlow ડૉક્ટર છે?", answer: "ના. MedFlow આરોગ્ય માહિતી અને સારવાર માર્ગદર્શનનું સાધન છે; તે તબીબનું સ્થાન લેતું નથી." },
+    { id: "medflow-diagnosis", category: "general", question: "શું MedFlow મારું નિદાન કરી શકે?", answer: "ના. મૂલ્યાંકન અને સારાંશ માત્ર માહિતી માટે છે અને તેને નિદાન માનવું જોઈએ નહીં." },
+    { id: "assessment-how", category: "assessment", question: "ક્લિનિકલ મૂલ્યાંકન કેવી રીતે કાર્ય કરે છે?", answer: "તમે લક્ષણો પસંદ કરો છો અને ગોઠવેલા પ્રશ્નોના જવાબ આપો છો. માહિતી ક્લિનિકલ સમીક્ષા માટે ગોઠવાય છે." },
+    { id: "assessment-next", category: "assessment", question: "મૂલ્યાંકન પૂર્ણ કર્યા પછી શું થાય છે?", answer: "તમે સારાંશ જોઈ શકો છો, ઉપલબ્ધ ડૉક્ટર શોધી શકો છો અને યોગ્ય હોય ત્યારે કતાર ટોકન બનાવી શકો છો." },
+    { id: "assessment-speaking", category: "assessment", question: "શું હું બોલ્યા વિના MedFlow વાપરી શકું?", answer: "હા. દરેક મૂલ્યાંકન ક્ષેત્ર કીબોર્ડથી ભરી શકાય છે; અવાજ ઇનપુટ વૈકલ્પિક છે." },
+    { id: "documents-upload", category: "documents", question: "શું હું તબીબી દસ્તાવેજો અપલોડ કરી શકું?", answer: "હા. આધારભૂત PDF અને છબીઓ ઇન્ટેક દરમિયાન અપલોડ કરી શકાય છે અને મૂલ્યાંકન સાથે સુરક્ષિત રીતે સંગ્રહિત થાય છે." },
+    { id: "documents-protection", category: "documents", question: "મારા તબીબી દસ્તાવેજો કેવી રીતે સુરક્ષિત છે?", answer: "મૂળ ફાઇલો ખાનગી બકેટમાં સંગ્રહિત છે અને તબીબો તેને માત્ર અધિકૃત MedFlow સત્રથી જ જોઈ શકે છે." },
+    { id: "doctor-assessment", category: "doctors", question: "ડૉક્ટર મારું મૂલ્યાંકન કેવી રીતે જુએ છે?", answer: "તમારા અધિકૃત કતાર ટોકન સાથે જોડાયેલા ડૉક્ટર જ પોતાના કાર્યસ્થળમાં તે મૂલ્યાંકન ખોલી શકે છે." },
+    { id: "find-doctor", category: "doctors", question: "ડૉક્ટર શોધો કેવી રીતે કાર્ય કરે છે?", answer: "પસંદ કરેલી હોસ્પિટલના લાઇવ ડેટામાંથી સક્રિય ડૉક્ટરો જોવા માટે હોસ્પિટલ અને વિભાગ પસંદ કરો." },
+    { id: "queue-token", category: "queue", question: "કતાર/ટોકન સિસ્ટમ શું છે?", answer: "ટોકન પસંદ કરેલા ડૉક્ટરની કતારમાં તમારું સ્થાન દર્શાવે છે અને લાઇવ કતાર દૃશ્યમાં જોઈ શકાય છે." },
+    { id: "now-serving", category: "queue", question: "હવે સેવા આપવામાં આવે છે તેનો અર્થ શું?", answer: "તે ડૉક્ટરની કતારમાં હાલમાં બોલાવવામાં આવતા અથવા જોવામાં આવતા ટોકનને બતાવે છે." },
+    { id: "public-information", category: "privacy", question: "શું મારી માહિતી જાહેરમાં વહેંચાય છે?", answer: "ના. તબીબી માહિતી અધિકૃત સારવાર કાર્યપ્રવાહ સુધી મર્યાદિત છે; જાહેર કતાર દૃશ્યોમાં ફક્ત ટોકન માહિતી જ વપરાય છે." },
+    { id: "voice-input", category: "accessibility", question: "અવાજ ઇનપુટ કેવી રીતે કાર્ય કરે છે?", answer: "સક્રિય હોય ત્યારે અવાજ ઇનપુટ જવાબ નોંધવામાં મદદ કરે છે. સાચવતા પહેલાં તમે ઓળખાયેલ લખાણની પુષ્ટિ અથવા ફરી પ્રયાસ કરી શકો છો." },
+    { id: "microphone", category: "accessibility", question: "MedFlow ને માઇક્રોફોન પરવાનગી શા માટે જોઈએ?", answer: "માઇક્રોફોન પરવાનગી ફક્ત ત્યારે માંગવામાં આવે છે જ્યારે તમે અવાજ ઇનપુટ વાપરવાનું પસંદ કરો." },
+  ],
+};
+
+resources.hi.translation.patientFaq = {
+  eyebrow: "सहायता", title: "सहायता और अक्सर पूछे जाने वाले प्रश्न", description: "MedFlow के बारे में उत्तर पाएँ या सहायता प्राप्त करें।", search: "सामान्य प्रश्न खोजें", categoriesLabel: "प्रश्न श्रेणियाँ", readAloud: "पढ़कर सुनाएँ", readAloudAria: "पढ़कर सुनाएँ: {{question}}", emptyTitle: "कोई प्रश्न नहीं मिला", emptyDetail: "कोई दूसरा खोज शब्द या श्रेणी आज़माएँ।", contactEyebrow: "सहायता से संपर्क", contactTitle: "डेमो सहायता संपर्क", demoSupport: "डेमो सहायता", important: "महत्वपूर्ण", emergencyTitle: "चिकित्सीय आपातस्थिति", emergencyDetail: "चिकित्सीय आपातस्थिति में अपनी स्थानीय आपातकालीन सेवा से संपर्क करें या निकटतम आपात विभाग जाएँ।",
+  categories: { general: "सामान्य", assessment: "मूल्यांकन", documents: "दस्तावेज़", doctors: "डॉक्टर और अपॉइंटमेंट", queue: "कतार और टोकन", privacy: "गोपनीयता और सुरक्षा", accessibility: "सुलभता" },
+  items: [
+    { id: "what-is-medflow", category: "general", question: "MedFlow क्या है?", answer: "MedFlow आपकी चुनी हुई जानकारी व्यवस्थित करने, संरचित मूल्यांकन पूरा करने और उपलब्ध देखभाल विकल्प खोजने में मदद करता है।" },
+    { id: "how-medflow-works", category: "general", question: "MedFlow कैसे काम करता है?", answer: "आप मूल्यांकन पूरा करते हैं, सहायक दस्तावेज़ अपलोड कर सकते हैं, संरचित सारांश देखते हैं और चाहें तो उपलब्ध डॉक्टर चुन सकते हैं।" },
+    { id: "medflow-doctor", category: "general", question: "क्या MedFlow डॉक्टर है?", answer: "नहीं। MedFlow स्वास्थ्य-सूचना और देखभाल-नेविगेशन उपकरण है; यह चिकित्सक का विकल्प नहीं है।" },
+    { id: "medflow-diagnosis", category: "general", question: "क्या MedFlow मेरा निदान कर सकता है?", answer: "नहीं। मूल्यांकन और सारांश केवल जानकारी के लिए हैं और इन्हें निदान नहीं माना जाना चाहिए।" },
+    { id: "assessment-how", category: "assessment", question: "क्लिनिकल मूल्यांकन कैसे काम करता है?", answer: "आप लक्षण चुनते हैं और संरचित प्रश्नों के उत्तर देते हैं। जानकारी क्लिनिकल समीक्षा के लिए व्यवस्थित की जाती है।" },
+    { id: "assessment-next", category: "assessment", question: "मूल्यांकन पूरा करने के बाद क्या होता है?", answer: "आप सारांश देख सकते हैं, उपलब्ध डॉक्टर खोज सकते हैं और उपयुक्त होने पर कतार टोकन बना सकते हैं।" },
+    { id: "assessment-speaking", category: "assessment", question: "क्या मैं बिना बोले MedFlow इस्तेमाल कर सकता हूँ?", answer: "हाँ। मूल्यांकन का हर क्षेत्र कीबोर्ड से भरा जा सकता है; वॉइस इनपुट वैकल्पिक है।" },
+    { id: "documents-upload", category: "documents", question: "क्या मैं चिकित्सीय दस्तावेज़ अपलोड कर सकता हूँ?", answer: "हाँ। समर्थित PDF और चित्र इंटेक के दौरान अपलोड किए जा सकते हैं और मूल्यांकन के साथ सुरक्षित रखे जाते हैं।" },
+    { id: "documents-protection", category: "documents", question: "मेरे चिकित्सीय दस्तावेज़ कैसे सुरक्षित हैं?", answer: "मूल फ़ाइलें निजी बकेट में रखी जाती हैं और चिकित्सक उन्हें केवल अधिकृत MedFlow सत्र से देख सकते हैं।" },
+    { id: "doctor-assessment", category: "doctors", question: "डॉक्टर मेरा मूल्यांकन कैसे देखता है?", answer: "केवल आपके अधिकृत कतार टोकन से जुड़े डॉक्टर ही अपने कार्यक्षेत्र में मूल्यांकन खोल सकते हैं।" },
+    { id: "find-doctor", category: "doctors", question: "डॉक्टर खोजें कैसे काम करता है?", answer: "चुने गए अस्पताल के लाइव डेटा से सक्रिय डॉक्टर देखने के लिए अस्पताल और विभाग चुनें।" },
+    { id: "queue-token", category: "queue", question: "कतार/टोकन प्रणाली क्या है?", answer: "टोकन चुने हुए डॉक्टर की कतार में आपका स्थान दर्शाता है और लाइव कतार दृश्य में देखा जा सकता है।" },
+    { id: "now-serving", category: "queue", question: "अभी सेवा में का क्या अर्थ है?", answer: "यह उस डॉक्टर की कतार में वर्तमान में बुलाए या देखे जा रहे टोकन को दिखाता है।" },
+    { id: "public-information", category: "privacy", question: "क्या मेरी जानकारी सार्वजनिक रूप से साझा होती है?", answer: "नहीं। चिकित्सीय जानकारी केवल अधिकृत देखभाल कार्यप्रवाह तक सीमित रहती है; सार्वजनिक कतार दृश्य केवल टोकन जानकारी का उपयोग करते हैं।" },
+    { id: "voice-input", category: "accessibility", question: "वॉइस इनपुट कैसे काम करता है?", answer: "सक्रिय होने पर वॉइस इनपुट उत्तर दर्ज करने में मदद करता है। सहेजने से पहले आप पहचाने गए पाठ की पुष्टि कर सकते हैं या फिर से प्रयास कर सकते हैं।" },
+    { id: "microphone", category: "accessibility", question: "MedFlow को माइक्रोफ़ोन की अनुमति क्यों चाहिए?", answer: "माइक्रोफ़ोन की अनुमति केवल तब माँगी जाती है जब आप वॉइस इनपुट चुनते हैं।" },
+  ],
+};
+
+resources.bn.translation.patientFaq = {
+  eyebrow: "সহায়তা", title: "সহায়তা ও সাধারণ প্রশ্ন", description: "MedFlow সম্পর্কে উত্তর পান বা সহায়তা নিন।", search: "সাধারণ প্রশ্ন খুঁজুন", categoriesLabel: "প্রশ্নের বিভাগ", readAloud: "পড়ে শোনান", readAloudAria: "পড়ে শোনান: {{question}}", emptyTitle: "কোনো প্রশ্ন পাওয়া যায়নি", emptyDetail: "অন্য অনুসন্ধান শব্দ বা বিভাগ চেষ্টা করুন।", contactEyebrow: "সহায়তায় যোগাযোগ", contactTitle: "ডেমো সহায়তা যোগাযোগ", demoSupport: "ডেমো সহায়তা", important: "গুরুত্বপূর্ণ", emergencyTitle: "চিকিৎসাগত জরুরি অবস্থা", emergencyDetail: "চিকিৎসাগত জরুরি অবস্থায় স্থানীয় জরুরি পরিষেবার সঙ্গে যোগাযোগ করুন বা নিকটতম জরুরি বিভাগে যান।",
+  categories: { general: "সাধারণ", assessment: "মূল্যায়ন", documents: "নথি", doctors: "ডাক্তার ও অ্যাপয়েন্টমেন্ট", queue: "সারি ও টোকেন", privacy: "গোপনীয়তা ও নিরাপত্তা", accessibility: "অভিগম্যতা" },
+  items: [
+    { id: "what-is-medflow", category: "general", question: "MedFlow কী?", answer: "MedFlow আপনার দেওয়া তথ্য গুছিয়ে রাখতে, একটি কাঠামোবদ্ধ মূল্যায়ন সম্পূর্ণ করতে এবং উপলব্ধ সেবার বিকল্প খুঁজতে সাহায্য করে।" },
+    { id: "how-medflow-works", category: "general", question: "MedFlow কীভাবে কাজ করে?", answer: "আপনি মূল্যায়ন সম্পূর্ণ করেন, সহায়ক নথি আপলোড করতে পারেন, কাঠামোবদ্ধ সারাংশ দেখেন এবং চাইলে উপলব্ধ ডাক্তার বেছে নিতে পারেন।" },
+    { id: "medflow-doctor", category: "general", question: "MedFlow কি ডাক্তার?", answer: "না। MedFlow স্বাস্থ্যতথ্য ও সেবা-নির্দেশনার একটি উপকরণ; এটি চিকিৎসকের বিকল্প নয়।" },
+    { id: "medflow-diagnosis", category: "general", question: "MedFlow কি আমার রোগ নির্ণয় করতে পারে?", answer: "না। মূল্যায়ন ও সারাংশ কেবল তথ্যের জন্য; এগুলিকে রোগ নির্ণয় হিসেবে ধরা যাবে না।" },
+    { id: "assessment-how", category: "assessment", question: "ক্লিনিক্যাল মূল্যায়ন কীভাবে কাজ করে?", answer: "আপনি উপসর্গ বেছে নেন এবং কাঠামোবদ্ধ প্রশ্নের উত্তর দেন। তথ্য ক্লিনিক্যাল পর্যালোচনার জন্য সাজানো হয়।" },
+    { id: "assessment-next", category: "assessment", question: "মূল্যায়ন শেষ হলে কী হয়?", answer: "আপনি সারাংশ দেখতে পারেন, উপলব্ধ ডাক্তার খুঁজতে পারেন এবং উপযুক্ত হলে সারির টোকেন তৈরি করতে পারেন।" },
+    { id: "assessment-speaking", category: "assessment", question: "কথা না বলে কি MedFlow ব্যবহার করা যায়?", answer: "হ্যাঁ। প্রতিটি মূল্যায়ন ক্ষেত্র কিবোর্ড দিয়ে পূরণ করা যায়; ভয়েস ইনপুট ঐচ্ছিক।" },
+    { id: "documents-upload", category: "documents", question: "আমি কি চিকিৎসা-নথি আপলোড করতে পারি?", answer: "হ্যাঁ। সমর্থিত PDF ও ছবি ইনটেকের সময় আপলোড করা যায় এবং মূল্যায়নের সঙ্গে নিরাপদে রাখা হয়।" },
+    { id: "documents-protection", category: "documents", question: "আমার চিকিৎসা-নথি কীভাবে সুরক্ষিত থাকে?", answer: "মূল ফাইল ব্যক্তিগত বালতিতে রাখা হয় এবং চিকিৎসকেরা কেবল অনুমোদিত MedFlow সেশনের মাধ্যমে দেখতে পারেন।" },
+    { id: "doctor-assessment", category: "doctors", question: "ডাক্তার কীভাবে আমার মূল্যায়ন দেখেন?", answer: "শুধু আপনার অনুমোদিত সারি টোকেনের সঙ্গে যুক্ত ডাক্তারই নিজের কর্মক্ষেত্রে মূল্যায়ন খুলতে পারেন।" },
+    { id: "find-doctor", category: "doctors", question: "ডাক্তার খুঁজুন কীভাবে কাজ করে?", answer: "নির্বাচিত হাসপাতালের লাইভ ডেটা থেকে সক্রিয় ডাক্তার দেখতে হাসপাতাল ও বিভাগ বেছে নিন।" },
+    { id: "queue-token", category: "queue", question: "সারি/টোকেন ব্যবস্থা কী?", answer: "টোকেন নির্বাচিত ডাক্তারের সারিতে আপনার স্থান বোঝায় এবং লাইভ সারি দৃশ্যে দেখা যায়।" },
+    { id: "now-serving", category: "queue", question: "এখন সেবা চলছে বলতে কী বোঝায়?", answer: "এটি সেই ডাক্তারের সারিতে বর্তমানে ডাকা বা দেখা হচ্ছে এমন টোকন দেখায়।" },
+    { id: "public-information", category: "privacy", question: "আমার তথ্য কি প্রকাশ্যে ভাগ করা হয়?", answer: "না। চিকিৎসা-তথ্য অনুমোদিত সেবা-প্রবাহের মধ্যেই সীমিত থাকে; প্রকাশ্য সারি দৃশ্যে শুধু টোকেন তথ্য ব্যবহৃত হয়।" },
+    { id: "voice-input", category: "accessibility", question: "ভয়েস ইনপুট কীভাবে কাজ করে?", answer: "সক্রিয় থাকলে ভয়েস ইনপুট উত্তর ধরতে সাহায্য করে। সংরক্ষণের আগে আপনি স্বীকৃত লেখাটি নিশ্চিত করতে বা আবার চেষ্টা করতে পারেন।" },
+    { id: "microphone", category: "accessibility", question: "MedFlow-এর মাইক্রোফোন অনুমতি কেন দরকার?", answer: "আপনি ভয়েস ইনপুট ব্যবহার করতে চাইলে তবেই মাইক্রোফোন অনুমতি চাওয়া হয়।" },
+  ],
 };
 
 // The selector and Sarvam use these regional language identifiers.  The
@@ -4222,7 +4327,7 @@ export const RTL_LANGUAGE_CODES = new Set(["ur-IN", "ks-IN", "sd-IN"]);
 const PORTAL_OVERRIDES = {
   hi: { goodMorning: "सुप्रभात, {{name}}", patientDashboardSubtitle: "आइए आज आपके स्वास्थ्य का ध्यान रखें।", activeQueue: "सक्रिय कतार", waiting: "प्रतीक्षा में", doctor: "डॉक्टर", hospital: "अस्पताल", patientsAhead: "आपके आगे मरीज", viewLiveQueue: "पूरी कतार देखें", startNewAssessment: "नया आकलन शुरू करें", startAssessmentFriendlyDescription: "बताइए आपको क्या परेशानी है। हम हर चरण में आपका मार्गदर्शन करेंगे।", startAssessment: "आकलन शुरू करें", recentAssessment: "हालिया आकलन", viewRecords: "रिकॉर्ड देखें", findDoctor: "डॉक्टर खोजें", logout: "लॉग आउट" },
   bn: { goodMorning: "শুভ সকাল, {{name}}", patientDashboardSubtitle: "আজ আপনার স্বাস্থ্যের যত্ন নেওয়া যাক।", activeQueue: "সক্রিয় সারি", waiting: "অপেক্ষমাণ", doctor: "ডাক্তার", hospital: "হাসপাতাল", patientsAhead: "আপনার আগে রোগী", viewLiveQueue: "সম্পূর্ণ সারি দেখুন", startNewAssessment: "নতুন মূল্যায়ন শুরু করুন", startAssessmentFriendlyDescription: "আপনার সমস্যা জানান। আমরা ধাপে ধাপে সাহায্য করব।", startAssessment: "মূল্যায়ন শুরু করুন", recentAssessment: "সাম্প্রতিক মূল্যায়ন", viewRecords: "রেকর্ড দেখুন", findDoctor: "ডাক্তার খুঁজুন", logout: "লগ আউট" },
-  gu: { goodMorning: "સુપ્રભાત, {{name}}", patientDashboardSubtitle: "આજે તમારા સ્વાસ્થ્યની કાળજી લઈએ.", activeQueue: "સક્રિય કતાર", waiting: "રાહમાં", doctor: "ડૉક્ટર", hospital: "હોસ્પિટલ", patientsAhead: "તમારી આગળના દર્દીઓ", viewLiveQueue: "સંપૂર્ણ કતાર જુઓ", startNewAssessment: "નવું મૂલ્યાંકન શરૂ કરો", startAssessmentFriendlyDescription: "તમને શું તકલીફ છે તે જણાવો. અમે પગલું પગલું માર્ગદર્શન આપીશું.", startAssessment: "મૂલ્યાંકન શરૂ કરો", recentAssessment: "તાજેતરનું મૂલ્યાંકન", viewRecords: "રેકોર્ડ જુઓ", findDoctor: "ડૉક્ટર શોધો", logout: "લૉગ આઉટ" },
+  gu: { goodMorning: "સુપ્રભાત, {{name}}", patientDashboardSubtitle: "આજે તમારા સ્વાસ્થ્યની કાળજી લઈએ.", activeQueue: "સક્રિય કતાર", waiting: "રાહમાં", doctor: "ડૉક્ટર", hospital: "હોસ્પિટલ", patientsAhead: "તમારી આગળના દર્દીઓ", viewLiveQueue: "સંપૂર્ણ કતાર જુઓ", startNewAssessment: "નવું મૂલ્યાંકન શરૂ કરો", startAssessmentFriendlyDescription: "તમને શું તકલીફ છે તે જણાવો. અમે પગલું પગલું માર્ગદર્શન આપીશું.", startAssessment: "મૂલ્યાંકન શરૂ કરો", recentAssessment: "તાજેતરનું મૂલ્યાંકન", viewRecords: "રેકોર્ડ જુઓ", findDoctor: "ડૉક્ટર શોધો", logout: "લૉગ આઉટ", documentsDescription: "તમારા વર્તમાન મૂલ્યાંકન સાથે જોડાયેલા દસ્તાવેજો અને તેમની કાઢેલી માહિતી જુઓ.", noDocuments: "કોઈ દસ્તાવેજ અપલોડ કરવામાં આવ્યો નથી.", noDocumentsDetail: "તમે ક્લિનિકલ ઇન્ટેક દરમિયાન વૈકલ્પિક PDF, JPG અથવા PNG ઉમેરી શકો છો." },
   kn: { goodMorning: "ಶುಭೋದಯ, {{name}}", patientDashboardSubtitle: "ಇಂದು ನಿಮ್ಮ ಆರೋಗ್ಯದ ಕಾಳಜಿ ವಹಿಸೋಣ.", activeQueue: "ಸಕ್ರಿಯ ಸರದಿ", waiting: "ನಿರೀಕ್ಷೆಯಲ್ಲಿದೆ", doctor: "ವೈದ್ಯರು", hospital: "ಆಸ್ಪತ್ರೆ", patientsAhead: "ನಿಮ್ಮ ಮುಂದಿರುವ ರೋಗಿಗಳು", viewLiveQueue: "ಸಂಪೂರ್ಣ ಸರದಿ ನೋಡಿ", startNewAssessment: "ಹೊಸ ಮೌಲ್ಯಮಾಪನ ಪ್ರಾರಂಭಿಸಿ", startAssessmentFriendlyDescription: "ನಿಮ್ಮ ಸಮಸ್ಯೆಯನ್ನು ತಿಳಿಸಿ. ನಾವು ಹಂತ ಹಂತವಾಗಿ ಮಾರ್ಗದರ್ಶನ ಮಾಡುತ್ತೇವೆ.", startAssessment: "ಮೌಲ್ಯಮಾಪನ ಪ್ರಾರಂಭಿಸಿ", recentAssessment: "ಇತ್ತೀಚಿನ ಮೌಲ್ಯಮಾಪನ", viewRecords: "ದಾಖಲೆಗಳನ್ನು ನೋಡಿ", findDoctor: "ವೈದ್ಯರನ್ನು ಹುಡುಕಿ", logout: "ಲಾಗ್ ಔಟ್" },
   ml: { goodMorning: "സുപ്രഭാതം, {{name}}", patientDashboardSubtitle: "ഇന്ന് നിങ്ങളുടെ ആരോഗ്യത്തെ ശ്രദ്ധിക്കാം.", activeQueue: "സജീവ ക്യൂ", waiting: "കാത്തിരിക്കുന്നു", doctor: "ഡോക്ടർ", hospital: "ആശുപത്രി", patientsAhead: "നിങ്ങളുടെ മുന്നിലുള്ള രോഗികൾ", viewLiveQueue: "മുഴുവൻ ക്യൂ കാണുക", startNewAssessment: "പുതിയ വിലയിരുത്തൽ തുടങ്ങുക", startAssessmentFriendlyDescription: "നിങ്ങളുടെ ബുദ്ധിമുട്ട് പറയൂ. ഓരോ ഘട്ടത്തിലും ഞങ്ങൾ വഴികാട്ടും.", startAssessment: "വിലയിരുത്തൽ തുടങ്ങുക", recentAssessment: "സമീപകാല വിലയിരുത്തൽ", viewRecords: "രേഖകൾ കാണുക", findDoctor: "ഡോക്ടറെ കണ്ടെത്തുക", logout: "ലോഗ് ഔട്ട്" },
   mr: { goodMorning: "शुभ सकाळ, {{name}}", patientDashboard: "रुग्ण डॅशबोर्ड", medicalDocuments: "वैद्यकीय दस्तऐवज", helpFaq: "मदत आणि प्रश्नोत्तरे", accessibility: "सुलभता", patientDashboardSubtitle: "आज तुमच्या आरोग्याची काळजी घेऊया.", activeQueue: "सक्रिय रांग", waiting: "प्रतीक्षेत", doctor: "डॉक्टर", hospital: "रुग्णालय", patientsAhead: "तुमच्या पुढील रुग्ण", viewLiveQueue: "पूर्ण रांग पहा", startNewAssessment: "नवीन मूल्यांकन सुरू करा", startAssessmentFriendlyDescription: "तुम्हाला काय त्रास होत आहे ते सांगा. आम्ही टप्प्याटप्प्याने मार्गदर्शन करू.", startAssessment: "मूल्यांकन सुरू करा", recentAssessment: "अलीकडील मूल्यांकन", viewRecords: "नोंदी पहा", findDoctor: "डॉक्टर शोधा", logout: "लॉग आउट" },
@@ -4287,10 +4392,15 @@ for (const { code, base } of MEDFLOW_LANGUAGES) {
   };
   translation.accessibility = { ...translation.accessibility, settings: portal.accessibility || translation.accessibility?.settings };
   translation.patientFind = { ...resources.en.translation.patientFind, ...translation.patientFind };
+  // Every portal language receives the complete FAQ shape. Individual language
+  // dictionaries can override any item without changing the page component.
+  translation.patientFaq = { ...resources.en.translation.patientFaq, ...translation.patientFaq };
   resources[code] = resources[base];
 }
 
 const LANGUAGE_STORAGE_KEY = "medflow-ui-language";
+export { resources };
+
 const getInitialLanguage = () => {
   if (typeof window === "undefined") return "en-IN";
   const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);

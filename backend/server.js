@@ -69,6 +69,7 @@ const languageCodes = {
   Maithili: "mai-IN",
   Dogri: "doi-IN",
 };
+const sarvamTtsLanguageCodes = new Set(["en-IN", "hi-IN", "bn-IN", "gu-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN"]);
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -860,6 +861,74 @@ app.put("/api/assessments/:assessmentId/clinical-summary", requireAssessmentOwne
     }
 });
 
+function splitTranslationInput(text, maxLength = 1800) {
+    if (text.length <= maxLength) return [text];
+    const chunks = [];
+    let remaining = text;
+    while (remaining.length > maxLength) {
+        const boundary = Math.max(remaining.lastIndexOf(" ", maxLength), remaining.lastIndexOf("\n", maxLength));
+        const end = boundary > 0 ? boundary : maxLength;
+        chunks.push(remaining.slice(0, end));
+        remaining = remaining.slice(end).trimStart();
+    }
+    if (remaining) chunks.push(remaining);
+    return chunks;
+}
+
+async function translateClinicalSummaryValue(value, targetLanguageCode) {
+    if (typeof value === "string") {
+        if (!value.trim()) return value;
+        const chunks = splitTranslationInput(value);
+        const translatedChunks = [];
+        for (const chunk of chunks) {
+            const result = await sarvam.text.translate({
+                input: chunk,
+                source_language_code: "en-IN",
+                target_language_code: targetLanguageCode,
+                mode: "formal",
+                model: "sarvam-translate:v1",
+            });
+            if (!result?.translated_text) throw new Error("Sarvam returned an empty translation.");
+            translatedChunks.push(result.translated_text);
+        }
+        return translatedChunks.join(" ");
+    }
+    if (Array.isArray(value)) {
+        const translated = [];
+        for (const item of value) translated.push(await translateClinicalSummaryValue(item, targetLanguageCode));
+        return translated;
+    }
+    if (value && typeof value === "object") {
+        const translated = {};
+        for (const [key, item] of Object.entries(value)) translated[key] = await translateClinicalSummaryValue(item, targetLanguageCode);
+        return translated;
+    }
+    return value;
+}
+
+app.get("/api/assessments/:assessmentId/clinical-summary/translation", requireAssessmentOwner, async (req, res) => {
+    const targetLanguageCode = String(req.query.languageCode || "").trim();
+    const supportedLanguageCodes = new Set(Object.values(languageCodes));
+    if (!supportedLanguageCodes.has(targetLanguageCode)) {
+        return res.status(400).json({ success: false, error: "The selected summary language is not supported." });
+    }
+    try {
+        const { data: clinicalSummary, error: summaryError } = await supabase.from("clinical_summaries")
+            .select("english_summary,hindi_summary").eq("assessment_id", req.params.assessmentId).maybeSingle();
+        if (summaryError) throw summaryError;
+        if (!clinicalSummary?.english_summary) return res.status(404).json({ success: false, error: "A saved clinical summary is required before it can be translated." });
+        if (targetLanguageCode === "en-IN") return res.json({ success: true, languageCode: targetLanguageCode, summary: clinicalSummary.english_summary });
+        if (targetLanguageCode === "hi-IN" && clinicalSummary.hindi_summary) return res.json({ success: true, languageCode: targetLanguageCode, summary: clinicalSummary.hindi_summary });
+        if (!process.env.SARVAM_API_KEY) return res.status(503).json({ success: false, error: "Summary translation is not configured." });
+
+        const summary = await translateClinicalSummaryValue(clinicalSummary.english_summary, targetLanguageCode);
+        return res.json({ success: true, languageCode: targetLanguageCode, summary });
+    } catch (error) {
+        console.error("Clinical summary translation error:", { message: error?.message, targetLanguageCode });
+        return res.status(502).json({ success: false, error: "Unable to translate the clinical summary right now." });
+    }
+});
+
 app.post("/api/assessments/:assessmentId/documents", requireAssessmentOwner, async (req, res) => {
     const { assessmentId } = req.params;
     const { fileName, fileType, fileSize, extractedText, extractionMethod, findings, originalFileBase64 } = req.body || {};
@@ -1323,6 +1392,68 @@ app.get("/api/patient/assessments/:assessmentId/clinical-review", requireRole("p
         }
         return res.json({ success: true, review: response });
     } catch (error) { console.error("Patient clinical review load error:", error); return res.status(500).json({ success: false, error: "Unable to load the physician review." }); }
+});
+
+app.get("/api/patient/assessments/:assessmentId/clinical-review/translation", requireRole("patient"), async (req, res) => {
+    const targetLanguageCode = String(req.query.languageCode || "").trim();
+    if (!Object.values(languageCodes).includes(targetLanguageCode)) {
+        return res.status(400).json({ success: false, error: "The selected summary language is not supported." });
+    }
+    try {
+        const { data: assessment, error: assessmentError } = await supabase.from("assessments")
+            .select("id,patient_id").eq("id", req.params.assessmentId).maybeSingle();
+        if (assessmentError) throw assessmentError;
+        if (!assessment || assessment.patient_id !== req.medxSession.patientId) return res.status(403).json({ success: false, error: "You do not have access to this physician review." });
+        const { data: review, error: reviewError } = await supabase.from("clinical_reviews")
+            .select("reviewed_summary,status").eq("assessment_id", assessment.id).maybeSingle();
+        if (reviewError) throw reviewError;
+        if (!review?.reviewed_summary || review.status !== "finalized") return res.status(404).json({ success: false, error: "A finalized physician review is not available yet." });
+        if (targetLanguageCode === "en-IN") return res.json({ success: true, languageCode: targetLanguageCode, summary: review.reviewed_summary });
+        if (!process.env.SARVAM_API_KEY) return res.status(503).json({ success: false, error: "Summary translation is not configured." });
+        const summary = await translateClinicalSummaryValue(review.reviewed_summary, targetLanguageCode);
+        return res.json({ success: true, languageCode: targetLanguageCode, summary });
+    } catch (error) {
+        console.error("Physician review translation error:", { message: error?.message, targetLanguageCode });
+        return res.status(502).json({ success: false, error: "Unable to translate the physician-reviewed summary right now." });
+    }
+});
+
+// Medical Records is not tied to transient frontend assessment state. Return the
+// patient's most recently finalized review, or their latest draft when one is
+// still awaiting finalization.
+app.get("/api/patient/clinical-review", requireRole("patient"), async (req, res) => {
+    try {
+        const { data: assessments, error: assessmentsError } = await supabase.from("assessments")
+            .select("id").eq("patient_id", req.medxSession.patientId);
+        if (assessmentsError) throw assessmentsError;
+        const assessmentIds = (assessments || []).map((assessment) => assessment.id);
+        if (!assessmentIds.length) return res.status(404).json({ success: false, error: "Physician review is not available yet." });
+
+        const reviewFields = "assessment_id,reviewed_summary,status,finalized_at,finalized_by,updated_at";
+        let { data: review, error: reviewError } = await supabase.from("clinical_reviews")
+            .select(reviewFields).in("assessment_id", assessmentIds).eq("status", "finalized")
+            .order("finalized_at", { ascending: false }).limit(1).maybeSingle();
+        if (reviewError) throw reviewError;
+        if (!review) {
+            const draftResult = await supabase.from("clinical_reviews").select(reviewFields)
+                .in("assessment_id", assessmentIds).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+            if (draftResult.error) throw draftResult.error;
+            review = draftResult.data;
+        }
+        if (!review) return res.status(404).json({ success: false, error: "Physician review is not available yet." });
+
+        const response = { assessmentId: review.assessment_id, status: review.status };
+        if (review.status === "finalized") {
+            let finalizedBy = null;
+            if (review.finalized_by) {
+                const { data: doctor, error: doctorError } = await supabase.from("doctors").select("name").eq("id", review.finalized_by).maybeSingle();
+                if (doctorError) throw doctorError;
+                finalizedBy = doctor?.name || null;
+            }
+            Object.assign(response, { reviewedSummary: review.reviewed_summary, finalizedAt: review.finalized_at, finalizedBy });
+        }
+        return res.json({ success: true, review: response });
+    } catch (error) { console.error("Patient latest clinical review load error:", error); return res.status(500).json({ success: false, error: "Unable to load the physician review." }); }
 });
 
 app.get("/api/admin/overview", requireRole("admin"), async (_req, res) => {
@@ -2889,6 +3020,46 @@ app.post("/api/sarvam/stt", audioUpload.single("audio"), async (req, res) => {
   }
 });
 
+app.post("/api/sarvam/tts", requireRole("patient", "staff", "admin"), async (req, res) => {
+  const text = String(req.body?.text || "").trim();
+  const languageCode = String(req.body?.languageCode || "").trim();
+  if (!text || text.length > 2400) {
+    return res.status(400).json({ success: false, error: "Text for speech must be between 1 and 2,400 characters." });
+  }
+  if (!sarvamTtsLanguageCodes.has(languageCode)) {
+    return res.status(400).json({ success: false, error: "Speech is not available for the selected language." });
+  }
+  if (!process.env.SARVAM_API_KEY) {
+    return res.status(503).json({ success: false, error: "Speech synthesis is not configured." });
+  }
+
+  try {
+    const result = await sarvam.textToSpeech.convert({
+      text,
+      language_code: languageCode,
+      speaker: "shubh",
+      model: "bulbul:v3",
+      pace: 1,
+      output_audio_codec: "mp3",
+    });
+    const audioBase64 = result?.audios?.[0];
+    if (!audioBase64) throw new Error("Sarvam returned no speech audio.");
+    return res.json({ success: true, audioBase64, mimeType: "audio/mpeg" });
+  } catch (error) {
+    const status = Number(error?.statusCode || error?.status || error?.response?.status);
+    console.error("Sarvam TTS request failed:", {
+      status: Number.isInteger(status) ? status : "unknown",
+      message: typeof error?.message === "string" ? error.message : "No error message returned",
+      languageCode,
+      textLength: text.length,
+    });
+    return res.status(Number.isInteger(status) && status >= 400 && status < 600 ? status : 502).json({
+      success: false,
+      error: "Speech synthesis is temporarily unavailable. Please try again.",
+    });
+  }
+});
+
 app.post(
     "/api/documents/ocr-analyze",
     upload.single("image"),
@@ -3055,7 +3226,7 @@ app.listen(PORT, () => {
 app.get("/api/auth/session", (req, res) => {
     const session = readSession(req);
     if (!session) return res.status(401).json({ success: false, error: "No active MedX session." });
-    return res.json({ success: true, session: { role: session.role, name: session.name, patientId: session.patientId || null, doctorId: session.doctorId || null, hospitalId: session.hospitalId || null, demo: Boolean(session.demo) } });
+    return res.json({ success: true, session: { role: session.role, name: session.name, abhaId: session.abhaId || "", patientId: session.patientId || null, doctorId: session.doctorId || null, hospitalId: session.hospitalId || null, demo: Boolean(session.demo) } });
 });
 
 app.post("/api/auth/logout", (_req, res) => {
@@ -3151,7 +3322,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (demo === true) {
         try {
             const patient = await getOrCreateDemoPatient();
-            issueSession(res, { role: "patient", name: DEMO_ACCOUNT.user.name, patientId: patient.id, demo: true });
+            issueSession(res, { role: "patient", name: DEMO_ACCOUNT.user.name, abhaId: DEMO_ACCOUNT.user.abhaId, patientId: patient.id, demo: true });
             return res.json({
                 success: true,
                 user: { ...publicUser(DEMO_ACCOUNT.user), patientId: patient.id },
@@ -3168,7 +3339,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!account || (account.password && account.password !== password)) {
         return res.status(401).json({ success: false, error: "Unable to sign in with those prototype credentials." });
     }
-    if (account.patientId) issueSession(res, { role: "patient", name: account.user?.name || account.name, patientId: account.patientId, demo: false });
+    if (account.patientId) issueSession(res, { role: "patient", name: account.user?.name || account.name, abhaId: account.user?.abhaId || account.abhaId || "", patientId: account.patientId, demo: false });
     res.json({ success: true, user: { ...publicUser(account.user || account), patientId: account.patientId || null }, patientId: account.patientId || null });
 });
 
@@ -3246,7 +3417,7 @@ app.post("/api/auth/register", async (req, res) => {
         };
 
         prototypeUsers.set(`abha:${user.abhaId}`, { user, patientId: patient.id });
-        issueSession(res, { role: "patient", name: user.name, patientId: patient.id, demo: false });
+        issueSession(res, { role: "patient", name: user.name, abhaId: user.abhaId, patientId: patient.id, demo: false });
 
         res.status(201).json({
             success: true,

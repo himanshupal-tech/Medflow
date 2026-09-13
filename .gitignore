@@ -9,11 +9,13 @@ frontend/dist/
 .env.*
 !.env.example
 backend/.env
+backend/DEMO_CREDENTIALS.md
 backend/*.json
 !backend/package.json
 !backend/package-lock.json
 
 # Runtime artifacts
 backend/temp-*.pdf
+backend/test-results/
 *.log
 .DS_Store
